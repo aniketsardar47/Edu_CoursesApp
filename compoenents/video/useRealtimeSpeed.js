@@ -14,7 +14,6 @@ const useRealtimeSpeed = (interval = 3000) => {
       try {
         const startTime = Date.now();
 
-        // Small test file (safe + fast)
         const response = await fetch(
           "https://speed.cloudflare.com/__down?bytes=500000"
         );
@@ -22,7 +21,7 @@ const useRealtimeSpeed = (interval = 3000) => {
         const blob = await response.blob();
         const endTime = Date.now();
 
-        const duration = (endTime - startTime) / 1000; // seconds
+        const duration = (endTime - startTime) / 1000;
         const bitsLoaded = blob.size * 8;
         const mbps = (bitsLoaded / duration) / (1024 * 1024);
 
@@ -34,7 +33,7 @@ const useRealtimeSpeed = (interval = 3000) => {
       }
     };
 
-    testSpeed(); // initial
+    testSpeed();
     const timer = setInterval(testSpeed, interval);
 
     return () => {

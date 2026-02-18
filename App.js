@@ -5,7 +5,7 @@ import Body from './compoenents/Body';   // 👈 import body.js
 export default function App() {
   return (
     <View style={styles.container}>
-      <Body />   {/* 👈 use it here */}
+      <Body /> 
       <StatusBar style="auto" />
     </View>
   );
