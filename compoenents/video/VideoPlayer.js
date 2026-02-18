@@ -33,7 +33,7 @@ const VideoPlayer = () => {
     setVideoData(null); // reset when video changes
 
     fetch(
-      `http://192.168.0.100:7777/api/videos/course/${courseId}/${videoId}`
+      `http://10.197.15.60:7777/api/videos/course/${courseId}/${videoId}`
     )
       .then((res) => res.json())
       .then((data) => setVideoData(data))
@@ -98,9 +98,11 @@ const VideoPlayer = () => {
     <ScrollView contentContainerStyle={styles.container}>
       {/* VIDEO */}
       <View style={styles.videoWrapper}>
+        
         <VideoView
           key={videoId} // ✅ force reload on lesson change
           player={player}
+          
           style={styles.video}
           allowsFullscreen
           nativeControls
@@ -137,10 +139,14 @@ const VideoPlayer = () => {
               >
                 {res}
               </Text>
+
+
             </TouchableOpacity>
           ))}
         </View>
-
+         
+            
+    
         {/* SPEED SECTION */}
         <View style={styles.speedCard}>
           <View style={styles.speedInfo}>
