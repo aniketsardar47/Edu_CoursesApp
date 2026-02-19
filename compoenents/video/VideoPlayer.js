@@ -13,9 +13,7 @@ import {
 import { useRoute, useNavigation } from "@react-navigation/native";
 import { Video } from "expo-av";
 import { downloadVideo } from "../utils/DownloadManager";
-import * as FileSystem from "expo-file-system";
-import * as FileSystemLegacy from "expo-file-system/legacy";
-
+import * as FileSystem from "expo-file-system/legacy";
 import * as Linking from "expo-linking";
 import * as Sharing from "expo-sharing";
 import { Ionicons } from "@expo/vector-icons";
@@ -32,23 +30,23 @@ const VideoPlayer = () => {
 
   const [videoData, setVideoData] = useState(null);
   const [quality, setQuality] = useState("Auto");
-  const [downloadProgress, setDownloadProgress] = useState(0);
   const [localUri, setLocalUri] = useState(null);
-  const [isSwitching, setIsSwitching] = useState(false);
+
   const [descriptionText, setDescriptionText] = useState("");
   const [loadingDescription, setLoadingDescription] = useState(false);
   const [showFullDesc, setShowFullDesc] = useState(false);
 
   const speed = useRealtimeSpeed(3000) ?? 0;
 
-  /* ================= FETCH VIDEO DATA ================= */
+  /* ================= FETCH VIDEO ================= */
   useEffect(() => {
     if (!courseId || !videoId) return;
 
-    setVideoData(null);
-    fetch(`http://10.197.15.60:7777/api/videos/course/${courseId}/${videoId}`)
+    fetch(
+      `http://10.197.15.60:7777/api/videos/course/${courseId}/${videoId}`
+    )
       .then((res) => res.json())
-      .then((data) => setVideoData(data))
+      .then(setVideoData)
       .catch((err) => console.error("Fetch error:", err));
   }, [courseId, videoId]);
 
@@ -81,18 +79,65 @@ const VideoPlayer = () => {
           {part.slice(1, -1)}
         </Text>
       ) : (
-        <Text key={index} style={styles.normalText}>{part}</Text>
+        <Text key={index} style={styles.normalText}>
+          {part}
+        </Text>
       )
     );
   };
 
-  /* ================= DOWNLOAD ATTACHMENT ================= */
+  /* ================= VIDEO URI ================= */
+  const currentUri = useMemo(() => {
+    if (!videoData) return null;
+    const res = videoData.resolutions || {};
+
+    if (quality === "Auto") {
+      if (speed < 1) return res.p240 || videoData.url;
+      if (speed < 3) return res.p360 || videoData.url;
+      return res.p720 || videoData.url;
+    }
+
+    return res[quality.replace("p", "p")] || videoData.url;
+  }, [quality, speed, videoData]);
+
+  const sourceUri = localUri || currentUri;
+
+  /* ================= SHARE VIDEO ================= */
+  const shareVideo = async () => {
+  try {
+    if (!localUri) {
+      Alert.alert("Download required", "Please download the video first");
+      return;
+    }
+
+    const info = await FileSystem.getInfoAsync(localUri);
+    if (!info.exists) {
+      Alert.alert("File missing", "Downloaded video not found");
+      return;
+    }
+
+    if (!(await Sharing.isAvailableAsync())) {
+      Alert.alert("Not supported", "Sharing not supported on this device");
+      return;
+    }
+
+    await Sharing.shareAsync(localUri, {
+      mimeType: "video/mp4",
+      dialogTitle: "Share video",
+      UTI: "public.movie",
+    });
+  } catch (e) {
+    console.log("SHARING ERROR:", e);
+    Alert.alert("Error", "Failed to share video");
+  }
+};
+
+  /* ================= ATTACHMENTS ================= */
   const downloadAttachment = async (url, fileName) => {
     try {
       const safeFileName = fileName.replace(/\s+/g, "_");
       const fileUri = FileSystemLegacy.documentDirectory + safeFileName;
 
-      // Use FileSystemLegacy instead of FileSystem
       const result = await FileSystemLegacy.downloadAsync(url, fileUri);
 
       if (result.status !== 200) {
@@ -100,78 +145,24 @@ const VideoPlayer = () => {
         return;
       }
 
-      // Use Sharing to open/save the file
       if (await Sharing.isAvailableAsync()) {
         await Sharing.shareAsync(result.uri);
       }
-
     } catch (error) {
       console.error(error);
-      Alert.alert("Download Error", "Could not complete download. Check your connection.");
+      Alert.alert(
+        "Download Error",
+        "Could not complete download. Check your connection."
+      );
     }
   };
-
-  /* ================= VIDEO URI ================= */
-  const currentUri = useMemo(() => {
-    if (!videoData) return null;
-    const res = videoData.resolutions;
-
-    if (quality === "Auto") {
-      if (speed < 1) return res?.p240 || videoData.url;
-      if (speed < 3) return res?.p360 || videoData.url;
-      return res?.p720 || videoData.url;
-    }
-
-    return {
-      "240p": res?.p240,
-      "360p": res?.p360,
-      "720p": res?.p720,
-    }[quality] || videoData.url;
-  }, [quality, speed, videoData]);
-
-  const sourceUri = localUri || currentUri;
-
-  /* ================= SHARE VIDEO (FIXED) ================= */
-const shareVideo = async () => {
-  try {
-    // 1. Check if sharing is available
-    if (!(await Sharing.isAvailableAsync())) {
-      Alert.alert("Error", "Sharing is not available on this device");
-      return;
-    }
-
-    // 2. Define a temporary path in the cache directory
-    // We use cache so the OS can clean it up later automatically
-    const tempUri = FileSystemLegacy.cacheDirectory + `share_${videoId}.mp4`;
-
-    Alert.alert("Preparing...", "Please wait while we prepare the video for sharing.");
-
-    // 3. Download the video from currentUri to the temporary path
-    // Using FileSystemLegacy to avoid the "deprecated" error
-    const { uri, status } = await FileSystemLegacy.downloadAsync(currentUri, tempUri);
-
-    if (status !== 200) {
-      throw new Error("Failed to download video for sharing");
-    }
-
-    // 4. Trigger the share sheet
-    await Sharing.shareAsync(uri, {
-      mimeType: 'video/mp4',
-      dialogTitle: `Share: ${videoData.title}`,
-    });
-
-  } catch (error) {
-    console.error("Share error:", error);
-    Alert.alert("Error", "Unable to share video. Please check your connection.");
-  }
-};
 
   const openAttachment = async (url) => {
     const supported = await Linking.canOpenURL(url);
     supported ? Linking.openURL(url) : Alert.alert("Cannot open file");
   };
 
-  if (!videoData) {
+  if (!videoData || !sourceUri) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#3b82f6" />
@@ -181,7 +172,10 @@ const shareVideo = async () => {
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 140 }}>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={{ paddingBottom: 140 }}
+    >
       {/* VIDEO */}
       <View style={styles.videoWrapper}>
         <Video
@@ -199,15 +193,31 @@ const shareVideo = async () => {
         <TouchableOpacity
           style={styles.actionBtn}
           onPress={async () => {
-            const ok = await downloadVideo(sourceUri, videoData.title);
-            Alert.alert(ok ? "Downloaded" : "Failed");
+            const uri = await downloadVideo(
+              sourceUri,
+              videoData.title
+            );
+            if (uri) {
+              setLocalUri(uri); // ✅ FIXED
+              Alert.alert("Success", "Video downloaded successfully");
+            } else {
+              Alert.alert("Error", "Download failed");
+            }
           }}
         >
           <Ionicons name="download-outline" size={20} color="#fff" />
           <Text style={styles.actionText}>Download</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={[styles.actionBtn, styles.shareBtn]} onPress={shareVideo}>
+        <TouchableOpacity
+          style={[
+            styles.actionBtn,
+            styles.shareBtn,
+            !localUri && { opacity: 0.5 },
+          ]}
+          onPress={shareVideo}
+          disabled={!localUri}
+        >
           <Ionicons name="share-social-outline" size={20} color="#fff" />
           <Text style={styles.actionText}>Share</Text>
         </TouchableOpacity>
@@ -220,23 +230,38 @@ const shareVideo = async () => {
           {["Auto", "240p", "360p", "720p"].map((q) => (
             <TouchableOpacity
               key={q}
-              style={[styles.qualityBtn, quality === q && styles.activeBtn]}
+              style={[
+                styles.qualityBtn,
+                quality === q && styles.activeBtn,
+              ]}
               onPress={() => setQuality(q)}
             >
-              <Text style={quality === q ? styles.activeBtnText : styles.btnText}>{q}</Text>
+              <Text
+                style={
+                  quality === q
+                    ? styles.activeBtnText
+                    : styles.btnText
+                }
+              >
+                {q}
+              </Text>
             </TouchableOpacity>
           ))}
         </View>
 
         <View style={styles.speedCard}>
-          <Text style={styles.speedValue}>{speed.toFixed(1)} Mbps</Text>
+          <Text style={styles.speedValue}>
+            {speed.toFixed(1)} Mbps
+          </Text>
         </View>
       </View>
 
       {/* DESCRIPTION */}
       <View style={styles.card}>
         <Text style={styles.sectionTitle}>DESCRIPTION</Text>
-        <Text numberOfLines={5} style={styles.descriptionText}>{descriptionText}</Text>
+        <Text numberOfLines={5} style={styles.descriptionText}>
+          {descriptionText}
+        </Text>
         {descriptionText.length > 200 && (
           <TouchableOpacity onPress={() => setShowFullDesc(true)}>
             <Text style={styles.readMore}>Read more</Text>
@@ -245,78 +270,91 @@ const shareVideo = async () => {
       </View>
 
       {/* ATTACHMENTS */}
-      {/* ATTACHMENTS */}
-{videoData.attachments.map((f) => (
-  <View key={f._id} style={styles.attachmentRow}>
-    {/* Download Button on the Left */}
-    <TouchableOpacity
-      style={styles.attachmentDownloadBtn}
-      onPress={() => downloadAttachment(f.downloadUrl, f.fileName)}
-    >
-      <Ionicons name="download-outline" size={18} color="#fff" />
-    </TouchableOpacity>
+      {Array.isArray(videoData.attachments) &&
+        videoData.attachments.map((f) => (
+          <View key={f._id} style={styles.attachmentRow}>
+            <TouchableOpacity
+              style={styles.attachmentDownloadBtn}
+              onPress={() =>
+                downloadAttachment(f.downloadUrl, f.fileName)
+              }
+            >
+              <Ionicons
+                name="download-outline"
+                size={18}
+                color="#fff"
+              />
+            </TouchableOpacity>
 
-    {/* File Details on the Right */}
-    <TouchableOpacity
-      style={styles.attachmentTextContainer}
-      onPress={() => openAttachment(f.downloadUrl)}
-    >
-      <Text style={styles.attachmentName} numberOfLines={1}>
-        {f.fileName}
-      </Text>
-      <Text style={styles.attachmentMeta}>
-        {f.fileType.toUpperCase()} • {f.size.toFixed(2)} MB
-      </Text>
-    </TouchableOpacity>
-  </View>
-))}
-
+            <TouchableOpacity
+              style={styles.attachmentTextContainer}
+              onPress={() => openAttachment(f.downloadUrl)}
+            >
+              <Text
+                style={styles.attachmentName}
+                numberOfLines={1}
+              >
+                {f.fileName}
+              </Text>
+              <Text style={styles.attachmentMeta}>
+                {f.fileType.toUpperCase()} •{" "}
+                {f.size.toFixed(2)} MB
+              </Text>
+            </TouchableOpacity>
+          </View>
+        ))}
 
       {/* QUIZ */}
       {videoData.quiz?.length > 0 && (
         <TouchableOpacity
           style={styles.quizBtn}
-          onPress={() => navigation.navigate("QuizScreen", { quiz: videoData.quiz })}
+          onPress={() =>
+            navigation.navigate("QuizScreen", {
+              quiz: videoData.quiz,
+            })
+          }
         >
-          <Ionicons name="help-circle-outline" size={20} color="#fff" />
+          <Ionicons
+            name="help-circle-outline"
+            size={20}
+            color="#fff"
+          />
           <Text style={styles.quizBtnText}>Start Quiz</Text>
         </TouchableOpacity>
       )}
 
       {/* FULL DESCRIPTION MODAL */}
-     {/* FULL DESCRIPTION MODAL */}
-<Modal
-  visible={showFullDesc}
-  transparent={true}
-  animationType="fade"
-  onRequestClose={() => setShowFullDesc(false)}
->
-  <View style={styles.modalOverlay}>
-    <View style={styles.modalBox}>
-      <Text style={styles.sectionTitle}>FULL DESCRIPTION</Text>
-      
-      {/* This ScrollView will now work independently of the background */}
-      <ScrollView 
-        style={styles.modalScrollView}
-        contentContainerStyle={styles.modalScrollContent}
+      <Modal
+        visible={showFullDesc}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowFullDesc(false)}
       >
-        <Text>{renderFormattedText(descriptionText)}</Text>
-      </ScrollView>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalBox}>
+            <Text style={styles.sectionTitle}>
+              FULL DESCRIPTION
+            </Text>
 
-      <TouchableOpacity 
-        style={styles.closeBtn} 
-        onPress={() => setShowFullDesc(false)}
-      >
-        <Text style={styles.closeText}>Close</Text>
-      </TouchableOpacity>
-    </View>
-  </View>
-</Modal>
+            <ScrollView style={styles.modalScrollView}>
+              <Text>{renderFormattedText(descriptionText)}</Text>
+            </ScrollView>
+
+            <TouchableOpacity
+              style={styles.closeBtn}
+              onPress={() => setShowFullDesc(false)}
+            >
+              <Text style={styles.closeText}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 };
 
 export default VideoPlayer;
+
 
 
 const styles = StyleSheet.create({
