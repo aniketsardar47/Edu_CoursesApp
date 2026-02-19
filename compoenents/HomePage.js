@@ -10,6 +10,7 @@ import {
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import { BookOpen, Clock, Users, PlayCircle } from "lucide-react-native";
+import * as Battery from "expo-battery";
 
 const HomePage = () => {
   const navigation = useNavigation();
@@ -18,12 +19,51 @@ const HomePage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  // 🔋 Battery state
+  const [batteryLevel, setBatteryLevel] = useState(null);
+  const [isBatterySaverOn, setIsBatterySaverOn] = useState(false);
+
+  /* ================= BATTERY REAL-TIME SYNC ================= */
   useEffect(() => {
-    fetch("http://10.197.15.60:7777/api/courses") // 🔁 change IP if real device
+    let levelSub;
+    let stateSub;
+
+    const initBattery = async () => {
+      const level = await Battery.getBatteryLevelAsync();
+      const percent = Math.round(level * 100);
+      setBatteryLevel(percent);
+      setIsBatterySaverOn(percent <= 20);
+    };
+
+    initBattery();
+
+    // 🔋 Battery percentage changes
+    levelSub = Battery.addBatteryLevelListener(({ batteryLevel }) => {
+      const percent = Math.round(batteryLevel * 100);
+      setBatteryLevel(percent);
+      setIsBatterySaverOn(percent <= 20);
+    });
+
+    // ⚡ Charging / unplugging detection
+    stateSub = Battery.addBatteryStateListener(() => {
+      Battery.getBatteryLevelAsync().then((level) => {
+        const percent = Math.round(level * 100);
+        setBatteryLevel(percent);
+        setIsBatterySaverOn(percent <= 20);
+      });
+    });
+
+    return () => {
+      levelSub?.remove();
+      stateSub?.remove();
+    };
+  }, []);
+
+  /* ================= FETCH COURSES ================= */
+  useEffect(() => {
+    fetch("http://10.197.15.60:7777/api/courses")
       .then((res) => {
-        if (!res.ok) {
-          throw new Error(`HTTP error! status: ${res.status}`);
-        }
+        if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
         return res.json();
       })
       .then((data) => {
@@ -72,8 +112,28 @@ const HomePage = () => {
 
   return (
     <View style={styles.container}>
+      {/* 🔋 BATTERY STATUS */}
+      <View style={styles.batteryBox}>
+        <Text style={styles.batteryText}>
+          🔋 Battery: {batteryLevel ?? "--"}%
+        </Text>
+
+        <Text
+          style={[
+            styles.batteryStatus,
+            { color: isBatterySaverOn ? "#f87171" : "#34d399" },
+          ]}
+        >
+          {isBatterySaverOn
+            ? "Battery Saver ON (Auto ≤ 20%)"
+            : "Battery Saver OFF"}
+        </Text>
+      </View>
+
       <Text style={styles.heading}>Welcome to LearnHub</Text>
-      <Text style={styles.subHeading}>Choose a course to start learning</Text>
+      <Text style={styles.subHeading}>
+        Choose a course to start learning
+      </Text>
 
       <FlatList
         data={courses}
@@ -83,15 +143,18 @@ const HomePage = () => {
         contentContainerStyle={{ paddingBottom: 40 }}
         renderItem={({ item }) => (
           <TouchableOpacity
-            style={styles.card}
+            style={[
+              styles.card,
+              isBatterySaverOn && { opacity: 0.85 },
+            ]}
             activeOpacity={0.8}
             onPress={() =>
               navigation.navigate("CourseScreen", {
                 courseId: item._id || item.id,
+                batterySaver: isBatterySaverOn,
               })
             }
           >
-            {/* 🖼 THUMBNAIL */}
             <Image
               source={{
                 uri:
@@ -101,7 +164,6 @@ const HomePage = () => {
               style={styles.thumbnail}
             />
 
-            {/* 📚 CONTENT */}
             <View style={styles.cardBody}>
               <Text style={styles.title} numberOfLines={1}>
                 {item.title}
@@ -111,7 +173,6 @@ const HomePage = () => {
                 {item.description || "Learn the fundamentals and advance"}
               </Text>
 
-              {/* 📊 META */}
               <View style={styles.metaRow}>
                 <View style={styles.metaItem}>
                   <BookOpen size={14} color="#9ca3af" />
@@ -135,7 +196,6 @@ const HomePage = () => {
                 </View>
               </View>
 
-              {/* ▶ ACTION */}
               <View style={styles.footer}>
                 <Text style={styles.price}>
                   {item.price ? `$${item.price}` : "Free"}
@@ -153,6 +213,10 @@ const HomePage = () => {
     </View>
   );
 };
+
+export default HomePage;
+
+/* ================= STYLES ================= */
 
 const styles = StyleSheet.create({
   container: {
@@ -255,6 +319,18 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 12,
   },
+  batteryBox: {
+    backgroundColor: "#16263b",
+    padding: 12,
+    borderRadius: 12,
+    marginBottom: 20,
+  },
+  batteryText: {
+    color: "#fff",
+    fontSize: 14,
+  },
+  batteryStatus: {
+    marginTop: 4,
+    fontWeight: "bold",
+  },
 });
-
-export default HomePage;

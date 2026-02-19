@@ -10,6 +10,7 @@ import {
   Dimensions,
   Alert,
 } from "react-native";
+// Import useIsFocused
 import { useRoute, useNavigation, useIsFocused } from "@react-navigation/native"; 
 import { Video } from "expo-av";
 import { downloadVideo } from "../utils/DownloadManager";
@@ -18,13 +19,14 @@ import * as Linking from "expo-linking";
 import * as Sharing from "expo-sharing";
 import { Ionicons } from "@expo/vector-icons";
 import useRealtimeSpeed from "./useRealtimeSpeed";
+import * as Battery from "expo-battery"; // 
 
 const { width } = Dimensions.get("window");
 
 const VideoPlayer = () => {
   const route = useRoute();
   const navigation = useNavigation();
-  const isFocused = useIsFocused();
+  const isFocused = useIsFocused(); // Track focus state
   const { courseId, videoId } = route.params;
 
   const videoRef = useRef(null);
@@ -35,10 +37,36 @@ const VideoPlayer = () => {
   const [loadingDescription, setLoadingDescription] = useState(false);
   const [showFullDesc, setShowFullDesc] = useState(false);
 
-  // --- NEW STATE TO TRACK TIME ---
-  const [lastPosition, setLastPosition] = useState(0);
+  // 🔋 Battery saver state (ADDED)
+  const [batterySaverOn, setBatterySaverOn] = useState(false);
+  
+    // ⚠️ Speed hook MUST always be called
+  const rawSpeed = useRealtimeSpeed(3000) ?? 0;
+  const speed = batterySaverOn ? 0 : rawSpeed;
 
-  /* ================= FETCH VIDEO DATA ================= */
+   useEffect(() => {
+    Battery.getBatteryLevelAsync().then((level) => {
+      const percent = Math.round(level * 100);
+      if (percent <= 20) {
+        setBatterySaverOn(true);
+        setQuality("240p");
+      }
+    });
+
+    const sub = Battery.addBatteryLevelListener(({ batteryLevel }) => {
+      const percent = Math.round(batteryLevel * 100);
+      if (percent <= 20) {
+        setBatterySaverOn(true);
+        setQuality("240p");
+        videoRef.current?.pauseAsync();
+      } else {
+        setBatterySaverOn(false);
+      }
+    });
+
+    return () => sub.remove();
+  }, []);
+
   useEffect(() => {
     if (!courseId || !videoId) return;
     fetch(`http://10.197.15.60:7777/api/videos/course/${courseId}/${videoId}`)
@@ -47,7 +75,6 @@ const VideoPlayer = () => {
       .catch((err) => console.error("Fetch error:", err));
   }, [courseId, videoId]);
 
-  /* ================= FETCH DESCRIPTION ================= */
   useEffect(() => {
     const fetchDescription = async () => {
       if (!videoData?.descriptionUrl) return;
@@ -64,15 +91,6 @@ const VideoPlayer = () => {
     };
     fetchDescription();
   }, [videoData?.descriptionUrl]);
-
-  /* ================= RESUME LOGIC ================= */
-  const onReadyForDisplay = () => {
-    if (videoRef.current && lastPosition > 0) {
-      videoRef.current.setPositionAsync(lastPosition);
-    }
-  };
-
-  const speed = useRealtimeSpeed(3000) ?? 0;
 
   const renderFormattedText = (text) => {
     if (!text) return null;
@@ -147,22 +165,14 @@ const VideoPlayer = () => {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 140 }}>
-      {/* VIDEO */}
-      <View style={styles.videoWrapper}>
+      <View style={[styles.videoWrapper, batterySaverOn && { opacity: 0.4 }]}>
         <Video
           ref={videoRef}
           source={{ uri: sourceUri }}
           style={styles.video}
           useNativeControls
           resizeMode="contain"
-          shouldPlay={isFocused}
-          // TRACK POSITION FREQUENTLY
-          onPlaybackStatusUpdate={(status) => {
-            if (status.isLoaded && status.isPlaying) {
-              setLastPosition(status.positionMillis);
-            }
-          }}
-          onReadyForDisplay={onReadyForDisplay}
+          shouldPlay={!batterySaverOn && isFocused} // 🔥 CONTROLLED
         />
       </View>
 
@@ -193,35 +203,35 @@ const VideoPlayer = () => {
         </TouchableOpacity>
       </View>
 
-      {/* QUALITY SELECTOR */}
+       {/* QUALITY */}
       <View style={styles.card}>
         <Text style={styles.sectionTitle}>SELECT QUALITY</Text>
         <View style={styles.buttonRow}>
           {["Auto", "240p", "360p", "720p"].map((q) => (
             <TouchableOpacity
               key={q}
-              style={[styles.qualityBtn, quality === q && styles.activeBtn]}
-              onPress={async () => {
-                // CAPTURE POSITION IMMEDIATELY BEFORE SWITCHING
-                if (videoRef.current) {
-                  const status = await videoRef.current.getStatusAsync();
-                  if (status.isLoaded) {
-                    setLastPosition(status.positionMillis);
-                  }
-                }
-                setQuality(q);
-              }}
+              disabled={batterySaverOn}
+              style={[
+                styles.qualityBtn,
+                quality === q && styles.activeBtn,
+                batterySaverOn && { opacity: 0.4 },
+              ]}
+              onPress={() => setQuality(q)}
             >
-              <Text style={quality === q ? styles.activeBtnText : styles.btnText}>{q}</Text>
+              <Text style={quality === q ? styles.activeBtnText : styles.btnText}>
+                {q}
+              </Text>
             </TouchableOpacity>
           ))}
         </View>
-        <View style={styles.speedCard}>
-          <Text style={styles.speedValue}>{speed.toFixed(1)} Mbps</Text>
-        </View>
+
+        {!batterySaverOn && (
+          <View style={styles.speedCard}>
+            <Text style={styles.speedValue}>{speed.toFixed(1)} Mbps</Text>
+          </View>
+        )}
       </View>
 
-      {/* DESCRIPTION */}
       <View style={styles.card}>
         <Text style={styles.sectionTitle}>DESCRIPTION</Text>
         <Text numberOfLines={5} style={styles.descriptionText}>{descriptionText}</Text>
@@ -232,7 +242,6 @@ const VideoPlayer = () => {
         )}
       </View>
 
-      {/* ATTACHMENTS */}
       {Array.isArray(videoData.attachments) &&
         videoData.attachments.map((f) => (
           <View key={f._id} style={styles.attachmentRow}>
@@ -246,7 +255,6 @@ const VideoPlayer = () => {
           </View>
         ))}
 
-      {/* QUIZ */}
       {videoData.quiz?.length > 0 && (
         <TouchableOpacity style={styles.quizBtn} onPress={() => navigation.navigate("QuizScreen", { quiz: videoData.quiz })}>
           <Ionicons name="help-circle-outline" size={20} color="#fff" />
@@ -254,7 +262,6 @@ const VideoPlayer = () => {
         </TouchableOpacity>
       )}
 
-      {/* FULL DESCRIPTION MODAL */}
       <Modal visible={showFullDesc} transparent animationType="fade" onRequestClose={() => setShowFullDesc(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalBox}>
@@ -270,7 +277,7 @@ const VideoPlayer = () => {
   );
 };
 
-// Styles mapping...
+// Styles remain exactly the same as your original code...
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#0a1929", padding: 16, paddingTop: 40 },
   loadingContainer: { flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "#0a1929" },

@@ -6,12 +6,12 @@ import {
   ActivityIndicator,
   TouchableOpacity,
   FlatList,
-  Alert,
 } from "react-native";
 import { Video, ResizeMode } from "expo-av";
-import { useNavigation, useRoute, useIsFocused } from "@react-navigation/native"; 
+import { useNavigation, useRoute, useIsFocused } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
-import { downloadVideo } from "./utils/DownloadManager"; 
+import { downloadVideo } from "./utils/DownloadManager";
+import * as Battery from "expo-battery"; // 🔋 BATTERY ADD
 
 const VideoPlayerScreen = () => {
   const route = useRoute();
@@ -26,21 +26,55 @@ const VideoPlayerScreen = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [networkSpeed, setNetworkSpeed] = useState(null);
-
-  // State to track the exact millisecond to resume from
   const [lastPosition, setLastPosition] = useState(0);
+
+  // 🔋 BATTERY STATES (ADD)
+  const [batteryLevel, setBatteryLevel] = useState(null);
+  const [batterySaverOn, setBatterySaverOn] = useState(false);
+
+  /* ================= BATTERY REAL-TIME ================= */
+  useEffect(() => {
+    Battery.getBatteryLevelAsync().then((level) => {
+      const percent = Math.round(level * 100);
+      setBatteryLevel(percent);
+      setBatterySaverOn(percent <= 20);
+
+      // 🔥 FORCE 240p WHEN BATTERY SAVER ON
+      if (percent <= 20) {
+        setQuality("240p");
+      }
+    });
+
+    const sub = Battery.addBatteryLevelListener(({ batteryLevel }) => {
+      const percent = Math.round(batteryLevel * 100);
+      setBatteryLevel(percent);
+
+      if (percent <= 20) {
+        setBatterySaverOn(true);
+        setQuality("240p"); // 🔥 force low quality
+      } else {
+        setBatterySaverOn(false);
+      }
+    });
+
+    return () => sub.remove();
+  }, []);
 
   /* ================= FETCH DATA ================= */
   useEffect(() => {
     const fetchVideo = async () => {
       try {
         setLoading(true);
-        const res = await fetch(`http://10.197.15.60:7777/api/videos/course/${courseId}/${videoId}`);
+        const res = await fetch(
+          `http://10.197.15.60:7777/api/videos/course/${courseId}/${videoId}`
+        );
         if (!res.ok) throw new Error("Video not found");
         const data = await res.json();
         setVideoData(data);
 
-        const listRes = await fetch(`http://10.197.15.60:7777/api/videos/course/${courseId}`);
+        const listRes = await fetch(
+          `http://10.197.15.60:7777/api/videos/course/${courseId}`
+        );
         const listData = await listRes.json();
         setCourseVideos(Array.isArray(listData) ? listData : []);
         setLoading(false);
@@ -51,38 +85,47 @@ const VideoPlayerScreen = () => {
     };
 
     if (courseId && videoId) fetchVideo();
+    else {
+      setError("Invalid course or video ID");
+      setLoading(false);
+    }
   }, [courseId, videoId]);
 
-  /* ================= RESUME LOGIC ================= */
+  /* ================= RESUME POSITION ================= */
   const onReadyForDisplay = () => {
     if (videoRef.current && lastPosition > 0) {
-      // Seek to the exact position saved before the quality switch
       videoRef.current.setPositionAsync(lastPosition);
     }
   };
 
-  /* ================= NETWORK SPEED ================= */
+  /* ================= NETWORK SPEED (DISABLE ON BATTERY SAVER) ================= */
   useEffect(() => {
+    if (batterySaverOn) {
+      setNetworkSpeed(null); // ❌ disable speed test
+      return;
+    }
+
     let interval;
     const checkSpeed = async () => {
       try {
         const startTime = Date.now();
-        const response = await fetch("https://www.google.com/images/branding/googlelogo/2x/googlelogo_color_92x30dp.png");
+        const response = await fetch(
+          "https://www.google.com/images/branding/googlelogo/2x/googlelogo_color_92x30dp.png"
+        );
         const blob = await response.blob();
         const endTime = Date.now();
-        const durationInSeconds = (endTime - startTime) / 1000;
-        const sizeInBits = blob.size * 8;
-        const speedBps = sizeInBits / durationInSeconds;
-        const speedKbps = (speedBps / 1024).toFixed(2);
+        const duration = (endTime - startTime) / 1000;
+        const speedKbps = ((blob.size * 8) / duration / 1024).toFixed(2);
         setNetworkSpeed(`${speedKbps} kbps`);
       } catch {
         setNetworkSpeed("N/A");
       }
     };
+
     checkSpeed();
     interval = setInterval(checkSpeed, 5000);
     return () => clearInterval(interval);
-  }, []);
+  }, [batterySaverOn]);
 
   if (loading) {
     return (
@@ -115,24 +158,21 @@ const VideoPlayerScreen = () => {
 
   return (
     <View style={styles.container}>
-      {/* Header */}
       <TouchableOpacity style={styles.backRow} onPress={() => navigation.goBack()}>
         <Ionicons name="chevron-back" size={22} color="#ccc" />
         <Text style={styles.backText}>Back to Course</Text>
       </TouchableOpacity>
 
-      {/* Video Player */}
       <View style={styles.playerBox}>
         <Video
           ref={videoRef}
           source={{ uri: currentVideoUrl }}
           useNativeControls
           resizeMode={ResizeMode.CONTAIN}
-          shouldPlay={isFocused}
+          shouldPlay={!batterySaverOn && isFocused} // 🔥 AUTO PLAY DISABLED
           style={styles.video}
-          // Constantly update the current position while playing
           onPlaybackStatusUpdate={(status) => {
-            if (status.isLoaded && status.isPlaying) {
+            if (status.isLoaded) {
               setLastPosition(status.positionMillis);
             }
           }}
@@ -140,48 +180,32 @@ const VideoPlayerScreen = () => {
         />
       </View>
 
-      {/* Action Buttons */}
-      <TouchableOpacity
-        style={styles.downloadBtn}
-        onPress={async () => {
-          const success = await downloadVideo(currentVideoUrl, videoData.title);
-          Alert.alert(success ? "Success" : "Error", success ? "✅ Added to My Downloads" : "❌ Failed to download");
-        }}
-      >
-        <Text style={styles.downloadBtnText}>⬇ Add to My Downloads</Text>
-      </TouchableOpacity>
+      {networkSpeed && (
+        <Text style={styles.networkSpeed}>Current Speed: {networkSpeed}</Text>
+      )}
 
-      <View style={styles.infoBox}>
-        <Text style={styles.title}>{videoData.title}</Text>
-        <Text style={styles.desc}>{videoData.textContent || "No description"}</Text>
-      </View>
-
-      {networkSpeed && <Text style={styles.networkSpeed}>Current Speed: {networkSpeed}</Text>}
-
-      {/* Quality Selector */}
+      {/* QUALITY SELECTOR (DISABLED WHEN BATTERY SAVER ON) */}
       <View style={styles.qualityRow}>
         {["Auto", "240p", "360p", "720p"].map((q) => (
           <TouchableOpacity
             key={q}
-            onPress={async () => {
-              // Capture the latest playback position before changing source
-              if (videoRef.current) {
-                const status = await videoRef.current.getStatusAsync();
-                if (status.isLoaded) {
-                  setLastPosition(status.positionMillis);
-                }
-              }
-              setQuality(q);
-            }}
-            style={[styles.qualityBtn, quality === q && styles.activeQuality]}
+            disabled={batterySaverOn}
+            onPress={() => setQuality(q)}
+            style={[
+              styles.qualityBtn,
+              quality === q && styles.activeQuality,
+              batterySaverOn && { opacity: 0.4 },
+            ]}
           >
             <Text style={styles.qualityText}>{q}</Text>
           </TouchableOpacity>
         ))}
       </View>
 
-      {/* Course List */}
-      <Text style={styles.sectionTitle}>Course Videos ({courseVideos.length})</Text>
+      <Text style={styles.sectionTitle}>
+        Course Videos ({courseVideos.length})
+      </Text>
+
       <FlatList
         data={courseVideos}
         keyExtractor={(item) => item._id || item.id}
@@ -193,11 +217,15 @@ const VideoPlayerScreen = () => {
             <TouchableOpacity
               style={[styles.videoItem, active && styles.activeVideo]}
               onPress={() => {
-                setLastPosition(0); // Reset time for new lessons
+                setLastPosition(0);
                 navigation.navigate("VideoPlayer", { courseId, videoId: vid });
               }}
             >
-              <Ionicons name="play-circle" size={22} color={active ? "#60a5fa" : "#9ca3af"} />
+              <Ionicons
+                name="play-circle"
+                size={22}
+                color={active ? "#60a5fa" : "#9ca3af"}
+              />
               <View style={{ marginLeft: 10 }}>
                 <Text style={styles.lesson}>Lesson {index + 1}</Text>
                 <Text style={styles.videoTitle}>{item.title}</Text>
@@ -210,6 +238,9 @@ const VideoPlayerScreen = () => {
     </View>
   );
 };
+
+export default VideoPlayerScreen;
+
 
 const styles = StyleSheet.create({
   container: { flex: 1, paddingTop: 20, backgroundColor: "#0a1929", paddingHorizontal: 14 },
@@ -237,5 +268,3 @@ const styles = StyleSheet.create({
   lesson: { color: "#94a3b8", fontSize: 12 },
   videoTitle: { color: "#fff", fontSize: 14 },
 });
-
-export default VideoPlayerScreen;
