@@ -33,7 +33,7 @@ const VideoPlayer = () => {
     setVideoData(null); // reset when video changes
 
     fetch(
-      `http://10.197.15.60:7777/api/videos/course/${courseId}/${videoId}`
+      `http://10.107.25.116:7777/api/videos/course/${courseId}/${videoId}`
     )
       .then((res) => res.json())
       .then((data) => setVideoData(data))

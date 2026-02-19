@@ -1,16 +1,17 @@
 import React, { useEffect, useRef, useState } from "react";
+
 import {
   View,
   Text,
   StyleSheet,
   ActivityIndicator,
   TouchableOpacity,
-  ScrollView,
   FlatList,
 } from "react-native";
 import { Video, ResizeMode } from "expo-av";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
+import { downloadVideo } from "./utils/DownloadManager"; // Updated download manager
 
 const VideoPlayerScreen = () => {
   const route = useRoute();
@@ -31,13 +32,14 @@ const VideoPlayerScreen = () => {
         setLoading(true);
 
         const res = await fetch(
-          `http://10.197.15.60:7777/api/videos/course/${courseId}/${videoId}`
+          `http://10.107.25.116:7777/api/videos/course/${courseId}/${videoId}`
         );
         if (!res.ok) throw new Error("Video not found");
         const data = await res.json();
         setVideoData(data);
+
         const listRes = await fetch(
-          `http://10.197.15.60:7777/api/videos/course/${courseId}`
+          `http://10.107.25.116:7777/api/videos/course/${courseId}`
         );
         const listData = await listRes.json();
         setCourseVideos(Array.isArray(listData) ? listData : []);
@@ -83,11 +85,10 @@ const VideoPlayerScreen = () => {
     "720p": videoData.resolutions?.p720,
   };
 
-  const currentVideoUrl =
-    VIDEO_SOURCES[quality] || videoData.url;
+  const currentVideoUrl = VIDEO_SOURCES[quality] || videoData.url;
 
   return (
-    <ScrollView style={styles.container}>
+    <View style={styles.container}>
       {/* Header */}
       <TouchableOpacity
         style={styles.backRow}
@@ -109,6 +110,19 @@ const VideoPlayerScreen = () => {
         />
       </View>
 
+      {/* Download Button */}
+      <TouchableOpacity
+  style={styles.downloadBtn}
+  onPress={async () => {
+    const success = await downloadVideo(currentVideoUrl, videoData.title);
+    if (success) alert("✅ Added to My Downloads");
+    else alert("❌ Failed to download. Check console for errors.");
+  }}
+>
+  <Text style={styles.downloadBtnText}>⬇ Add to My Downloads</Text>
+</TouchableOpacity>
+
+
       {/* Video Info */}
       <View style={styles.infoBox}>
         <Text style={styles.title}>{videoData.title}</Text>
@@ -123,17 +137,14 @@ const VideoPlayerScreen = () => {
           <TouchableOpacity
             key={q}
             onPress={() => setQuality(q)}
-            style={[
-              styles.qualityBtn,
-              quality === q && styles.activeQuality,
-            ]}
+            style={[styles.qualityBtn, quality === q && styles.activeQuality]}
           >
             <Text style={styles.qualityText}>{q}</Text>
           </TouchableOpacity>
         ))}
       </View>
 
-      {/* Sidebar Videos */}
+      {/* Sidebar Videos using FlatList outside ScrollView */}
       <Text style={styles.sectionTitle}>
         Course Videos ({courseVideos.length})
       </Text>
@@ -147,12 +158,9 @@ const VideoPlayerScreen = () => {
 
           return (
             <TouchableOpacity
-              style={[
-                styles.videoItem,
-                active && styles.activeVideo,
-              ]}
+              style={[styles.videoItem, active && styles.activeVideo]}
               onPress={() =>
-                navigation.replace("VideoPlayer", {
+                navigation.replace("VideoPlayerScreen", {
                   courseId,
                   videoId: vid,
                 })
@@ -164,113 +172,50 @@ const VideoPlayerScreen = () => {
                 color={active ? "#60a5fa" : "#9ca3af"}
               />
               <View style={{ marginLeft: 10 }}>
-                <Text style={styles.lesson}>
-                  Lesson {index + 1}
-                </Text>
-                <Text style={styles.videoTitle}>
-                  {item.title}
-                </Text>
+                <Text style={styles.lesson}>Lesson {index + 1}</Text>
+                <Text style={styles.videoTitle}>{item.title}</Text>
               </View>
             </TouchableOpacity>
           );
         }}
+        contentContainerStyle={{ paddingBottom: 100 }}
       />
-    </ScrollView>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    paddingTop: "10%",
-    backgroundColor: "#0a1929",
-    padding: 14,
-  },
-  center: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    backgroundColor: "#0a1929",
-  },
+  container: { flex: 1, paddingTop: 20, backgroundColor: "#0a1929", paddingHorizontal: 14 },
+  center: { flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "#0a1929" },
   text: { color: "#fff", marginTop: 10 },
   error: { color: "#f87171", fontSize: 18 },
   back: { color: "#60a5fa", marginTop: 10 },
 
-  backRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 10,
-  },
+  backRow: { flexDirection: "row", alignItems: "center", marginBottom: 10 },
   backText: { color: "#ccc", marginLeft: 6 },
 
-  playerBox: {
-    backgroundColor: "#000",
-    borderRadius: 14,
-    overflow: "hidden",
-  },
-  video: {
-    width: "100%",
-    height: 220,
-  },
+  playerBox: { backgroundColor: "#000", borderRadius: 14, overflow: "hidden" },
+  video: { width: "100%", height: 220 },
 
-  infoBox: {
-    marginTop: 12,
-  },
-  title: {
-    color: "#fff",
-    fontSize: 20,
-    fontWeight: "bold",
-  },
-  desc: {
-    color: "#cbd5e1",
-    marginTop: 6,
-  },
+  downloadBtn: { backgroundColor: "#16a34a", padding: 10, borderRadius: 8, marginTop: 10, alignItems: "center" },
+  downloadBtnText: { color: "#fff", fontWeight: "bold" },
 
-  qualityRow: {
-    flexDirection: "row",
-    gap: 8,
-    marginVertical: 12,
-  },
-  qualityBtn: {
-    padding: 8,
-    backgroundColor: "#1e293b",
-    borderRadius: 8,
-  },
-  activeQuality: {
-    backgroundColor: "#2563eb",
-  },
-  qualityText: {
-    color: "#fff",
-    fontSize: 12,
-  },
+  infoBox: { marginTop: 12 },
+  title: { color: "#fff", fontSize: 20, fontWeight: "bold" },
+  desc: { color: "#cbd5e1", marginTop: 6 },
 
-  sectionTitle: {
-    color: "#fff",
-    fontSize: 18,
-    marginVertical: 10,
-  },
+  qualityRow: { flexDirection: "row", gap: 8, marginVertical: 12 },
+  qualityBtn: { padding: 8, backgroundColor: "#1e293b", borderRadius: 8 },
+  activeQuality: { backgroundColor: "#2563eb" },
+  qualityText: { color: "#fff", fontSize: 12 },
 
-  videoItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#1e293b",
-    padding: 12,
-    borderRadius: 12,
-    marginBottom: 8,
-  },
-  activeVideo: {
-    borderWidth: 1,
-    borderColor: "#60a5fa",
-  },
-  lesson: {
-    color: "#94a3b8",
-    fontSize: 12,
-  },
-  videoTitle: {
-    color: "#fff",
-    fontSize: 14,
-  },
+  sectionTitle: { color: "#fff", fontSize: 18, marginVertical: 10 },
+
+  videoItem: { flexDirection: "row", alignItems: "center", backgroundColor: "#1e293b", padding: 12, borderRadius: 12, marginBottom: 8 },
+  activeVideo: { borderWidth: 1, borderColor: "#60a5fa" },
+  lesson: { color: "#94a3b8", fontSize: 12 },
+  videoTitle: { color: "#fff", fontSize: 14 },
 });
 
-
 export default VideoPlayerScreen;
+

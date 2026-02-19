@@ -3,9 +3,10 @@ import { NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 
 import HomePage from "./HomePage";
-import VideoPlayer from "./video/VideoPlayer";
 import CourseScreen from "./CourseScreen";
 import VideoPlayerScreen from "./VideoPlayerScreen";
+import MyDownloads from "./MyDownloads"; // ✅ Make sure this file exists
+
 const Stack = createNativeStackNavigator();
 
 export default function Body() {
@@ -13,13 +14,9 @@ export default function Body() {
     <NavigationContainer>
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         <Stack.Screen name="Home" component={HomePage} />
-        <Stack.Screen name="VideoPlayer" component={VideoPlayer} />
         <Stack.Screen name="CourseScreen" component={CourseScreen} />
-        <Stack.Screen
-          name="VideoPlayerScreen"
-          component={VideoPlayerScreen}
-        />
-
+        <Stack.Screen name="VideoPlayerScreen" component={VideoPlayerScreen} /> 
+        <Stack.Screen name="MyDownloads" component={MyDownloads} /> 
       </Stack.Navigator>
     </NavigationContainer>
   );
