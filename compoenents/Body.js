@@ -6,7 +6,7 @@ import HomePage from "./HomePage";
 import CourseScreen from "./CourseScreen";
 import VideoPlayerScreen from "./VideoPlayerScreen";
 import MyDownloads from "./MyDownloads"; // ✅ Make sure this file exists
-
+import VideoPlayer from "./video/VideoPlayer"; // ✅ Make sure this file exists
 const Stack = createNativeStackNavigator();
 
 export default function Body() {
@@ -17,6 +17,7 @@ export default function Body() {
         <Stack.Screen name="CourseScreen" component={CourseScreen} />
         <Stack.Screen name="VideoPlayerScreen" component={VideoPlayerScreen} /> 
         <Stack.Screen name="MyDownloads" component={MyDownloads} /> 
+        <Stack.Screen name="VideoPlayer" component={VideoPlayer} /> 
       </Stack.Navigator>
     </NavigationContainer>
   );
