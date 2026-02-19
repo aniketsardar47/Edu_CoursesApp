@@ -30,11 +30,11 @@ const CourseScreen = () => {
     }
 
     Promise.all([
-      fetch(`http://10.107.25.116:7777/api/courses/${courseId}`).then(res => {
+      fetch(`http://10.197.15.60:7777/api/courses/${courseId}`).then(res => {
         if (!res.ok) throw new Error("Course not found");
         return res.json();
       }),
-      fetch(`http://10.107.25.116:7777/api/videos/course/${courseId}`).then(res => {
+      fetch(`http://10.197.15.60:7777/api/videos/course/${courseId}`).then(res => {
         if (!res.ok) throw new Error("Videos not found");
         return res.json();
       }),

@@ -2,6 +2,7 @@ import React, { useEffect, useState, useMemo, useRef } from "react";
 import {
   View,
   Text,
+  Modal,
   StyleSheet,
   ActivityIndicator,
   ScrollView,
@@ -9,41 +10,108 @@ import {
   Dimensions,
   Alert,
 } from "react-native";
-import { useRoute } from "@react-navigation/native";
+import { useRoute, useNavigation } from "@react-navigation/native";
 import { Video } from "expo-av";
+import { downloadVideo } from "../utils/DownloadManager";
 import * as FileSystem from "expo-file-system";
+import * as FileSystemLegacy from "expo-file-system/legacy";
+
+import * as Linking from "expo-linking";
+import * as Sharing from "expo-sharing";
+import { Ionicons } from "@expo/vector-icons";
 import useRealtimeSpeed from "./useRealtimeSpeed";
 
 const { width } = Dimensions.get("window");
 
 const VideoPlayer = () => {
   const route = useRoute();
+  const navigation = useNavigation();
   const { courseId, videoId } = route.params;
 
   const videoRef = useRef(null);
 
   const [videoData, setVideoData] = useState(null);
   const [quality, setQuality] = useState("Auto");
-  const [isDownloaded, setIsDownloaded] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [localUri, setLocalUri] = useState(null);
   const [isSwitching, setIsSwitching] = useState(false);
+  const [descriptionText, setDescriptionText] = useState("");
+  const [loadingDescription, setLoadingDescription] = useState(false);
+  const [showFullDesc, setShowFullDesc] = useState(false);
 
-  const speed = useRealtimeSpeed(3000);
+  const speed = useRealtimeSpeed(3000) ?? 0;
 
   /* ================= FETCH VIDEO DATA ================= */
   useEffect(() => {
     if (!courseId || !videoId) return;
 
     setVideoData(null);
-
-    fetch(`http://10.107.25.116:7777/api/videos/course/${courseId}/${videoId}`)
+    fetch(`http://10.197.15.60:7777/api/videos/course/${courseId}/${videoId}`)
       .then((res) => res.json())
       .then((data) => setVideoData(data))
       .catch((err) => console.error("Fetch error:", err));
   }, [courseId, videoId]);
 
-  /* ================= VIDEO URI BASED ON QUALITY ================= */
+  /* ================= FETCH DESCRIPTION ================= */
+  useEffect(() => {
+    const fetchDescription = async () => {
+      if (!videoData?.descriptionUrl) return;
+      try {
+        setLoadingDescription(true);
+        const response = await fetch(videoData.descriptionUrl);
+        const text = await response.text();
+        setDescriptionText(text);
+      } catch {
+        setDescriptionText("Description not available.");
+      } finally {
+        setLoadingDescription(false);
+      }
+    };
+    fetchDescription();
+  }, [videoData?.descriptionUrl]);
+
+  /* ================= FORMAT *BOLD* ================= */
+  const renderFormattedText = (text) => {
+    if (!text) return null;
+    const parts = text.split(/(\*[^*]+\*)/g);
+
+    return parts.map((part, index) =>
+      part.startsWith("*") && part.endsWith("*") ? (
+        <Text key={index} style={styles.boldHighlight}>
+          {part.slice(1, -1)}
+        </Text>
+      ) : (
+        <Text key={index} style={styles.normalText}>{part}</Text>
+      )
+    );
+  };
+
+  /* ================= DOWNLOAD ATTACHMENT ================= */
+  const downloadAttachment = async (url, fileName) => {
+    try {
+      const safeFileName = fileName.replace(/\s+/g, "_");
+      const fileUri = FileSystemLegacy.documentDirectory + safeFileName;
+
+      // Use FileSystemLegacy instead of FileSystem
+      const result = await FileSystemLegacy.downloadAsync(url, fileUri);
+
+      if (result.status !== 200) {
+        Alert.alert("Error", "Server failed to provide the file.");
+        return;
+      }
+
+      // Use Sharing to open/save the file
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(result.uri);
+      }
+
+    } catch (error) {
+      console.error(error);
+      Alert.alert("Download Error", "Could not complete download. Check your connection.");
+    }
+  };
+
+  /* ================= VIDEO URI ================= */
   const currentUri = useMemo(() => {
     if (!videoData) return null;
     const res = videoData.resolutions;
@@ -55,85 +123,54 @@ const VideoPlayer = () => {
     }
 
     return {
-      "240p": res?.p240 || videoData.url,
-      "360p": res?.p360 || videoData.url,
-      "720p": res?.p720 || videoData.url,
-    }[quality];
+      "240p": res?.p240,
+      "360p": res?.p360,
+      "720p": res?.p720,
+    }[quality] || videoData.url;
   }, [quality, speed, videoData]);
-
-  /* ================= LOCAL FILE PATH ================= */
-  const getLocalPath = () =>
-    `${FileSystem.documentDirectory}videos/course_${courseId}/video_${videoId}_${quality}.mp4`;
-
-  /* ================= CHECK IF VIDEO IS DOWNLOADED ================= */
-  useEffect(() => {
-    const checkLocal = async () => {
-      if (!currentUri) return;
-
-      const info = await FileSystem.getInfoAsync(getLocalPath());
-      if (info.exists) {
-        setIsDownloaded(true);
-        setLocalUri(info.uri);
-      } else {
-        setIsDownloaded(false);
-        setLocalUri(null);
-      }
-    };
-    checkLocal();
-  }, [currentUri]);
-
-  /* ================= DOWNLOAD VIDEO ================= */
-  const downloadVideo = async () => {
-    try {
-      const dir = `${FileSystem.documentDirectory}videos/course_${courseId}`;
-      await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
-
-      const downloadResumable = FileSystem.createDownloadResumable(
-        currentUri,
-        getLocalPath(),
-        {},
-        (progress) => {
-          const percent =
-            progress.totalBytesWritten / progress.totalBytesExpectedToWrite;
-          setDownloadProgress(percent);
-        }
-      );
-
-      const result = await downloadResumable.downloadAsync();
-      setLocalUri(result.uri);
-      setIsDownloaded(true);
-      setDownloadProgress(0);
-      Alert.alert("Download Complete", "✅ Video downloaded successfully!");
-    } catch (e) {
-      console.error("Download error:", e);
-      Alert.alert("Download Failed", "❌ Could not download the video.");
-    }
-  };
 
   const sourceUri = localUri || currentUri;
 
-  /* ================= VIDEO SWITCHING ================= */
-  useEffect(() => {
-    if (!videoRef.current || !sourceUri) return;
+  /* ================= SHARE VIDEO (FIXED) ================= */
+const shareVideo = async () => {
+  try {
+    // 1. Check if sharing is available
+    if (!(await Sharing.isAvailableAsync())) {
+      Alert.alert("Error", "Sharing is not available on this device");
+      return;
+    }
 
-    setIsSwitching(true);
+    // 2. Define a temporary path in the cache directory
+    // We use cache so the OS can clean it up later automatically
+    const tempUri = FileSystemLegacy.cacheDirectory + `share_${videoId}.mp4`;
 
-    const statusUpdate = async () => {
-      const status = await videoRef.current.getStatusAsync();
-      const currentTime = status.positionMillis;
+    Alert.alert("Preparing...", "Please wait while we prepare the video for sharing.");
 
-      await videoRef.current.loadAsync(
-        { uri: sourceUri },
-        { shouldPlay: true, positionMillis: currentTime }
-      );
+    // 3. Download the video from currentUri to the temporary path
+    // Using FileSystemLegacy to avoid the "deprecated" error
+    const { uri, status } = await FileSystemLegacy.downloadAsync(currentUri, tempUri);
 
-      setIsSwitching(false);
-    };
+    if (status !== 200) {
+      throw new Error("Failed to download video for sharing");
+    }
 
-    statusUpdate();
-  }, [sourceUri]);
+    // 4. Trigger the share sheet
+    await Sharing.shareAsync(uri, {
+      mimeType: 'video/mp4',
+      dialogTitle: `Share: ${videoData.title}`,
+    });
 
-  /* ================= LOADING STATE ================= */
+  } catch (error) {
+    console.error("Share error:", error);
+    Alert.alert("Error", "Unable to share video. Please check your connection.");
+  }
+};
+
+  const openAttachment = async (url) => {
+    const supported = await Linking.canOpenURL(url);
+    supported ? Linking.openURL(url) : Alert.alert("Cannot open file");
+  };
+
   if (!videoData) {
     return (
       <View style={styles.loadingContainer}>
@@ -144,8 +181,8 @@ const VideoPlayer = () => {
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      {/* VIDEO PLAYER */}
+    <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 140 }}>
+      {/* VIDEO */}
       <View style={styles.videoWrapper}>
         <Video
           ref={videoRef}
@@ -155,88 +192,155 @@ const VideoPlayer = () => {
           resizeMode="contain"
           shouldPlay
         />
-
-        {isSwitching && (
-          <View style={styles.overlay}>
-            <ActivityIndicator color="#fff" />
-            <Text style={styles.overlayText}>Switching Quality...</Text>
-          </View>
-        )}
       </View>
 
-      {/* DOWNLOAD BUTTON */}
-      <TouchableOpacity
-        style={[styles.downloadBtn, isDownloaded && { backgroundColor: "#15803d" }]}
-        disabled={isDownloaded}
-        onPress={downloadVideo}
-      >
-        <Text style={styles.downloadText}>
-          {isDownloaded ? "Downloaded ✔" : "Download Video"}
-        </Text>
-      </TouchableOpacity>
+      {/* DOWNLOAD / SHARE */}
+      <View style={styles.actionRow}>
+        <TouchableOpacity
+          style={styles.actionBtn}
+          onPress={async () => {
+            const ok = await downloadVideo(sourceUri, videoData.title);
+            Alert.alert(ok ? "Downloaded" : "Failed");
+          }}
+        >
+          <Ionicons name="download-outline" size={20} color="#fff" />
+          <Text style={styles.actionText}>Download</Text>
+        </TouchableOpacity>
 
-      {downloadProgress > 0 && (
-        <View style={styles.progressBarBg}>
-          <View
-            style={[styles.progressBarFill, { width: `${downloadProgress * 100}%` }]}
-          />
-        </View>
-      )}
+        <TouchableOpacity style={[styles.actionBtn, styles.shareBtn]} onPress={shareVideo}>
+          <Ionicons name="share-social-outline" size={20} color="#fff" />
+          <Text style={styles.actionText}>Share</Text>
+        </TouchableOpacity>
+      </View>
 
-      {/* QUALITY SELECTOR */}
+      {/* QUALITY */}
       <View style={styles.card}>
-        <Text style={styles.label}>SELECT QUALITY</Text>
-
+        <Text style={styles.sectionTitle}>SELECT QUALITY</Text>
         <View style={styles.buttonRow}>
-          {["Auto", "240p", "360p", "720p"].map((res) => (
+          {["Auto", "240p", "360p", "720p"].map((q) => (
             <TouchableOpacity
-              key={res}
-              style={[styles.qualityBtn, quality === res && styles.activeBtn]}
-              onPress={() => setQuality(res)}
+              key={q}
+              style={[styles.qualityBtn, quality === q && styles.activeBtn]}
+              onPress={() => setQuality(q)}
             >
-              <Text style={[styles.btnText, quality === res && styles.activeBtnText]}>
-                {res}
-              </Text>
+              <Text style={quality === q ? styles.activeBtnText : styles.btnText}>{q}</Text>
             </TouchableOpacity>
           ))}
         </View>
 
-        {/* REAL-TIME NETWORK SPEED */}
         <View style={styles.speedCard}>
-          <View style={styles.speedInfo}>
-            <Text style={styles.speedValue}>{speed?.toFixed(1) || "0.0"}</Text>
-            <Text style={styles.speedUnit}>Mbps</Text>
-          </View>
-          <Text style={styles.speedLabel}>REAL-TIME NETWORK SPEED</Text>
-          <View style={styles.progressBarBg}>
-            <View
-              style={[styles.progressBarFill, { width: `${Math.min((speed / 10) * 100, 100)}%` }]}
-            />
-          </View>
+          <Text style={styles.speedValue}>{speed.toFixed(1)} Mbps</Text>
         </View>
       </View>
+
+      {/* DESCRIPTION */}
+      <View style={styles.card}>
+        <Text style={styles.sectionTitle}>DESCRIPTION</Text>
+        <Text numberOfLines={5} style={styles.descriptionText}>{descriptionText}</Text>
+        {descriptionText.length > 200 && (
+          <TouchableOpacity onPress={() => setShowFullDesc(true)}>
+            <Text style={styles.readMore}>Read more</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {/* ATTACHMENTS */}
+      {/* ATTACHMENTS */}
+{videoData.attachments.map((f) => (
+  <View key={f._id} style={styles.attachmentRow}>
+    {/* Download Button on the Left */}
+    <TouchableOpacity
+      style={styles.attachmentDownloadBtn}
+      onPress={() => downloadAttachment(f.downloadUrl, f.fileName)}
+    >
+      <Ionicons name="download-outline" size={18} color="#fff" />
+    </TouchableOpacity>
+
+    {/* File Details on the Right */}
+    <TouchableOpacity
+      style={styles.attachmentTextContainer}
+      onPress={() => openAttachment(f.downloadUrl)}
+    >
+      <Text style={styles.attachmentName} numberOfLines={1}>
+        {f.fileName}
+      </Text>
+      <Text style={styles.attachmentMeta}>
+        {f.fileType.toUpperCase()} • {f.size.toFixed(2)} MB
+      </Text>
+    </TouchableOpacity>
+  </View>
+))}
+
+
+      {/* QUIZ */}
+      {videoData.quiz?.length > 0 && (
+        <TouchableOpacity
+          style={styles.quizBtn}
+          onPress={() => navigation.navigate("QuizScreen", { quiz: videoData.quiz })}
+        >
+          <Ionicons name="help-circle-outline" size={20} color="#fff" />
+          <Text style={styles.quizBtnText}>Start Quiz</Text>
+        </TouchableOpacity>
+      )}
+
+      {/* FULL DESCRIPTION MODAL */}
+     {/* FULL DESCRIPTION MODAL */}
+<Modal
+  visible={showFullDesc}
+  transparent={true}
+  animationType="fade"
+  onRequestClose={() => setShowFullDesc(false)}
+>
+  <View style={styles.modalOverlay}>
+    <View style={styles.modalBox}>
+      <Text style={styles.sectionTitle}>FULL DESCRIPTION</Text>
+      
+      {/* This ScrollView will now work independently of the background */}
+      <ScrollView 
+        style={styles.modalScrollView}
+        contentContainerStyle={styles.modalScrollContent}
+      >
+        <Text>{renderFormattedText(descriptionText)}</Text>
+      </ScrollView>
+
+      <TouchableOpacity 
+        style={styles.closeBtn} 
+        onPress={() => setShowFullDesc(false)}
+      >
+        <Text style={styles.closeText}>Close</Text>
+      </TouchableOpacity>
+    </View>
+  </View>
+</Modal>
     </ScrollView>
   );
 };
 
 export default VideoPlayer;
 
-/* ================= STYLES ================= */
+
 const styles = StyleSheet.create({
+  /* ================= SCREEN ================= */
   container: {
-    flexGrow: 1,
+    flex: 1,
     backgroundColor: "#0a1929",
     padding: 16,
     paddingTop: 40,
   },
+
   loadingContainer: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
     backgroundColor: "#0a1929",
   },
-  loadingText: { color: "#94a3b8", marginTop: 10 },
 
+  loadingText: {
+    color: "#94a3b8",
+    marginTop: 10,
+  },
+
+  /* ================= VIDEO ================= */
   videoWrapper: {
     width: "100%",
     aspectRatio: 16 / 9,
@@ -244,64 +348,258 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     overflow: "hidden",
   },
-  video: { width: "100%", height: "100%" },
+
+  video: {
+    width: "100%",
+    height: "100%",
+  },
+
   overlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: "rgba(0,0,0,0.6)",
     justifyContent: "center",
     alignItems: "center",
   },
-  overlayText: { color: "#fff", marginTop: 8, fontWeight: "bold" },
 
-  downloadBtn: {
-    marginTop: 14,
-    backgroundColor: "#16a34a",
-    paddingVertical: 12,
-    borderRadius: 12,
-    alignItems: "center",
+  overlayText: {
+    color: "#fff",
+    marginTop: 8,
+    fontWeight: "bold",
   },
-  downloadText: { color: "#fff", fontWeight: "bold" },
 
+  /* ================= ACTION BUTTONS ================= */
+  actionRow: {
+    flexDirection: "row",
+    gap: 12,
+    marginTop: 14,
+  },
+
+  actionBtn: {
+    flex: 1,
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    paddingVertical: 12,
+    borderRadius: 14,
+    backgroundColor: "#2563eb",
+  },
+
+  shareBtn: {
+    backgroundColor: "#16a34a",
+  },
+
+  actionText: {
+    color: "#fff",
+    fontWeight: "bold",
+    marginLeft: 6,
+  },
+
+  /* ================= CARD ================= */
   card: {
     marginTop: 24,
     padding: 20,
     backgroundColor: "#1e2f4a",
     borderRadius: 20,
   },
-  label: {
+
+  sectionTitle: {
     color: "#3b82f6",
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: "bold",
     marginBottom: 12,
+    letterSpacing: 1,
   },
+
+  /* ================= QUALITY ================= */
   buttonRow: {
     flexDirection: "row",
     backgroundColor: "#0a1929",
     borderRadius: 12,
     padding: 4,
-    marginBottom: 24,
+    marginBottom: 20,
   },
-  qualityBtn: { flex: 1, paddingVertical: 10, alignItems: "center", borderRadius: 10 },
-  activeBtn: { backgroundColor: "#3b82f6" },
-  btnText: { color: "#94a3b8", fontWeight: "600" },
-  activeBtnText: { color: "#fff" },
 
-  speedCard: { alignItems: "center", backgroundColor: "#0f172a", padding: 15, borderRadius: 15 },
-  speedInfo: { flexDirection: "row", alignItems: "baseline" },
-  speedValue: { fontSize: 32, fontWeight: "800", color: "#fff" },
-  speedUnit: { fontSize: 14, color: "#3b82f6", marginLeft: 4 },
-  speedLabel: { fontSize: 9, color: "#64748b", marginTop: 2 },
-
-  progressBarBg: {
-    width: "100%",
-    height: 4,
-    backgroundColor: "#1e2f4a",
-    borderRadius: 2,
-    marginTop: 10,
+  qualityBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    alignItems: "center",
+    borderRadius: 10,
   },
-  progressBarFill: {
-    height: "100%",
+
+  activeBtn: {
     backgroundColor: "#3b82f6",
   },
-});
 
+  btnText: {
+    color: "#94a3b8",
+    fontWeight: "600",
+  },
+
+  activeBtnText: {
+    color: "#fff",
+    fontWeight: "700",
+  },
+
+  /* ================= SPEED ================= */
+  speedCard: {
+    alignItems: "center",
+    backgroundColor: "#0f172a",
+    padding: 14,
+    borderRadius: 15,
+  },
+
+  speedValue: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#fff",
+  },
+
+  /* ================= DESCRIPTION ================= */
+  descriptionText: {
+    color: "#e5e7eb",
+    fontSize: 14,
+    lineHeight: 20,
+  },
+
+  readMore: {
+    color: "#60a5fa",
+    marginTop: 6,
+    fontWeight: "600",
+  },
+
+  normalText: {
+    color: "#e5e7eb",
+    fontSize: 14,
+    lineHeight: 20,
+  },
+
+  boldHighlight: {
+    color: "#ffffff",
+    fontWeight: "bold",// matches video background
+    paddingHorizontal: 4,
+    borderRadius: 4,
+  },
+
+  /* ================= ATTACHMENTS ================= */
+  attachmentRow: {
+    flexDirection: "row", // Align items horizontally
+    alignItems: "center", // Center items vertically
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: "#334155",
+    backgroundColor: "#16263b", // Slight background to define the row
+    borderRadius: 12,
+    marginBottom: 8,
+  },
+
+  attachmentDownloadBtn: {
+    backgroundColor: "#2563eb",
+    width: 36, // Fixed width for a "short"/circular look
+    height: 36, // Fixed height
+    padding: 20,
+    margin: 10,
+    borderRadius: 18, // Circular
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 12, // Space between button and text
+  },
+
+  attachmentTextContainer: {
+    flex: 1, // Take up remaining space
+    paddingLeft: 10,
+    justifyContent: "center",
+  },
+
+  attachmentName: {
+    color: "#ffffff",
+    fontWeight: "600",
+    fontSize: 14,
+  },
+
+  attachmentMeta: {
+    color: "#94a3b8",
+    fontSize: 12,
+    marginTop: 2,
+  },
+
+  /* ================= QUIZ ================= */
+  quizBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#7c3aed",
+    paddingVertical: 14,
+    borderRadius: 14,
+    marginTop: 24,
+  },
+
+  quizBtnText: {
+    color: "#fff",
+    fontWeight: "bold",
+    marginLeft: 8,
+    fontSize: 16,
+  },
+
+  /* ================= MODAL ================= */
+  modalOverlay: {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    left: 0,
+    right: 0,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+
+  modalOverlay: {
+    flex: 1, // Crucial for Modal
+    justifyContent: "center",
+    alignItems: "center",
+  },
+
+  modalBox: {
+    width: "90%",
+    height: "60%", // Give it a specific height relative to screen
+    backgroundColor: "#1e2f4a", // Matches your card color
+    borderRadius: 20,
+    padding: 20,
+    // Add shadow for better depth
+   
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  modalScrollView: {
+    flex: 1, // Takes up all space between title and button
+    marginVertical: 15,
+  },
+
+  modalScrollContent: {
+    paddingBottom: 10,
+  },
+
+  closeBtn: {
+    marginTop: 16,
+    alignSelf: "center",
+    paddingVertical: 8,
+    paddingHorizontal: 24,
+    backgroundColor: "#2563eb",
+    borderRadius: 10,
+  },
+
+  closeText: {
+    color: "#fff",
+    fontWeight: "bold",
+  },
+  attachmentDownloadBtn: {
+    backgroundColor: "#2563eb",
+    padding: 10,
+    borderRadius: 10,
+    marginLeft: 12,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+
+});

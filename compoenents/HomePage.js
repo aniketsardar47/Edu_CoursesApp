@@ -19,7 +19,7 @@ const HomePage = () => {
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    fetch("http://10.107.25.116:7777/api/courses") // 🔁 change IP if real device
+    fetch("http://10.197.15.60:7777/api/courses") // 🔁 change IP if real device
       .then((res) => {
         if (!res.ok) {
           throw new Error(`HTTP error! status: ${res.status}`);

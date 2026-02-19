@@ -26,8 +26,8 @@
       "edgeToEdgeEnabled": true,
       "permissions": [
         "READ_MEDIA_VIDEO",
-        "WRITE_EXTERNAL_STORAGE",
-        "READ_MEDIA_VIDEO",
+        "READ_MEDIA_AUDIO",
+         "READ_EXTERNAL_STORAGE",
         "WRITE_EXTERNAL_STORAGE"
       ],
       "package": "com.anonymous.myApp"
