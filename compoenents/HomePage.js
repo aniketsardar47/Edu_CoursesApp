@@ -7,9 +7,10 @@ import {
   Image,
   FlatList,
   TouchableOpacity,
+  ScrollView,
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
-import { BookOpen, Clock, Users, PlayCircle } from "lucide-react-native";
+import { BookOpen, Clock, Users, PlayCircle, Zap } from "lucide-react-native";
 import * as Battery from "expo-battery";
 
 const HomePage = () => {
@@ -29,23 +30,27 @@ const HomePage = () => {
     let stateSub;
 
     const initBattery = async () => {
-      const level = await Battery.getBatteryLevelAsync();
-      const percent = Math.round(level * 100);
-      setBatteryLevel(percent);
-      setIsBatterySaverOn(percent <= 20);
+      try {
+        const level = await Battery.getBatteryLevelAsync();
+        const percent = Math.round(level * 100);
+        setBatteryLevel(percent);
+        setIsBatterySaverOn(percent <= 20);
+      } catch (error) {
+        console.log("Battery info not available");
+      }
     };
 
     initBattery();
 
     // 🔋 Battery percentage changes
-    levelSub = Battery.addBatteryLevelListener(({ batteryLevel }) => {
+    const batteryLevelListener = Battery.addBatteryLevelListener(({ batteryLevel }) => {
       const percent = Math.round(batteryLevel * 100);
       setBatteryLevel(percent);
       setIsBatterySaverOn(percent <= 20);
     });
 
     // ⚡ Charging / unplugging detection
-    stateSub = Battery.addBatteryStateListener(() => {
+    const batteryStateListener = Battery.addBatteryStateListener(() => {
       Battery.getBatteryLevelAsync().then((level) => {
         const percent = Math.round(level * 100);
         setBatteryLevel(percent);
@@ -54,8 +59,8 @@ const HomePage = () => {
     });
 
     return () => {
-      levelSub?.remove();
-      stateSub?.remove();
+      batteryLevelListener?.remove();
+      batteryStateListener?.remove();
     };
   }, []);
 
@@ -83,8 +88,10 @@ const HomePage = () => {
   if (loading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator size="large" color="#3b82f6" />
-        <Text style={styles.loadingText}>Loading courses...</Text>
+        <View style={styles.loadingContent}>
+          <ActivityIndicator size="large" color="#bb86fc" />
+          <Text style={styles.loadingText}>Loading courses...</Text>
+        </View>
       </View>
     );
   }
@@ -93,10 +100,23 @@ const HomePage = () => {
   if (error) {
     return (
       <View style={styles.center}>
-        <Text style={styles.errorText}>Error: {error}</Text>
-        <Text style={styles.errorHint}>
-          Make sure backend is running on port 7777
-        </Text>
+        <View style={styles.errorCard}>
+          <Zap size={48} color="#bb86fc" />
+          <Text style={styles.errorText}>Error: {error}</Text>
+          <Text style={styles.errorHint}>
+            Make sure backend is running on port 7777
+          </Text>
+          <TouchableOpacity 
+            style={styles.retryBtn}
+            onPress={() => {
+              setLoading(true);
+              setError(null);
+              // Retry logic would go here
+            }}
+          >
+            <Text style={styles.retryBtnText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     );
   }
@@ -105,111 +125,174 @@ const HomePage = () => {
   if (courses.length === 0) {
     return (
       <View style={styles.center}>
-        <Text style={styles.emptyText}>No courses found</Text>
+        <View style={styles.emptyCard}>
+          <BookOpen size={48} color="#2a2a2a" />
+          <Text style={styles.emptyText}>No courses found</Text>
+        </View>
       </View>
     );
   }
 
+  const getBatteryIcon = () => {
+    if (batteryLevel <= 20) return "🔴";
+    if (batteryLevel <= 50) return "🟡";
+    return "🟢";
+  };
+
   return (
     <View style={styles.container}>
-      {/* 🔋 BATTERY STATUS */}
-      <View style={styles.batteryBox}>
-        <Text style={styles.batteryText}>
-          🔋 Battery: {batteryLevel ?? "--"}%
-        </Text>
-
-        <Text
-          style={[
-            styles.batteryStatus,
-            { color: isBatterySaverOn ? "#f87171" : "#34d399" },
-          ]}
-        >
-          {isBatterySaverOn
-            ? "Battery Saver ON"
-            : "Battery Saver OFF"}
-        </Text>
-      </View>
-
-      <Text style={styles.heading}>Welcome to LearnHub</Text>
-      <Text style={styles.subHeading}>
-        Choose a course to start learning
-      </Text>
-
-      <FlatList
-        data={courses}
-        keyExtractor={(item) => item._id || item.id}
-        numColumns={2}
-        columnWrapperStyle={{ gap: 14 }}
-        contentContainerStyle={{ paddingBottom: 40 }}
-        renderItem={({ item }) => (
-          <TouchableOpacity
-            style={[
-              styles.card,
-              isBatterySaverOn && { opacity: 0.85 },
-            ]}
-            activeOpacity={0.8}
-            onPress={() =>
-              navigation.navigate("CourseScreen", {
-                courseId: item._id || item.id,
-                batterySaver: isBatterySaverOn,
-              })
-            }
-          >
-            <Image
-              source={{
-                uri:
-                  item.thumbnail ||
-                  "https://images.unsplash.com/photo-1516321318423-f06f85e504b3",
-              }}
-              style={styles.thumbnail}
-            />
-
-            <View style={styles.cardBody}>
-              <Text style={styles.title} numberOfLines={1}>
-                {item.title}
+      <ScrollView 
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.scrollContent}
+      >
+        {/* Welcome Header with Purple Accent */}
+        <View style={styles.headerSection}>
+          <View style={styles.welcomeRow}>
+            <View style={styles.welcomeAccent} />
+            <View>
+              <Text style={styles.heading}>Welcome to Edu_Course</Text>
+              <Text style={styles.subHeading}>
+                Choose a course to start learning
               </Text>
+            </View>
+          </View>
+        </View>
 
-              <Text style={styles.description} numberOfLines={2}>
-                {item.description || "Learn the fundamentals and advance"}
+        {/* 🔋 BATTERY STATUS CARD */}
+        <View style={styles.batteryCard}>
+          <View style={styles.batteryIconContainer}>
+            <View style={[styles.batteryIcon, { backgroundColor: isBatterySaverOn ? '#bb86fc20' : '#4ade8020' }]}>
+              <Text style={styles.batteryIconText}>{getBatteryIcon()}</Text>
+            </View>
+          </View>
+          
+          <View style={styles.batteryInfo}>
+            <Text style={styles.batteryLabel}>
+              Battery Level
+            </Text>
+            <View style={styles.batteryLevelRow}>
+              <Text style={styles.batteryPercentage}>
+                {batteryLevel ?? "--"}%
               </Text>
-
-              <View style={styles.metaRow}>
-                <View style={styles.metaItem}>
-                  <BookOpen size={14} color="#9ca3af" />
-                  <Text style={styles.metaText}>
-                    {item.videoCount || item.videos?.length || 0}
-                  </Text>
-                </View>
-
-                <View style={styles.metaItem}>
-                  <Clock size={14} color="#9ca3af" />
-                  <Text style={styles.metaText}>
-                    {item.duration || "8h"}
-                  </Text>
-                </View>
-
-                <View style={styles.metaItem}>
-                  <Users size={14} color="#9ca3af" />
-                  <Text style={styles.metaText}>
-                    {item.students || "1.2k"}
-                  </Text>
-                </View>
-              </View>
-
-              <View style={styles.footer}>
-                <Text style={styles.price}>
-                  {item.price ? `$${item.price}` : "Free"}
+              <View style={[
+                styles.batteryStatusBadge,
+                { backgroundColor: isBatterySaverOn ? 'rgba(187, 134, 252, 0.1)' : 'rgba(74, 222, 128, 0.1)' }
+              ]}>
+                <Text style={[
+                  styles.batteryStatusText,
+                  { color: isBatterySaverOn ? "#bb86fc" : "#4ade80" }
+                ]}>
+                  {isBatterySaverOn ? "Saver Mode ON" : "Normal Mode"}
                 </Text>
-
-                <View style={styles.startBtn}>
-                  <PlayCircle size={16} color="#fff" />
-                  <Text style={styles.startText}>Start</Text>
-                </View>
               </View>
             </View>
-          </TouchableOpacity>
-        )}
-      />
+          </View>
+          
+          <View style={styles.batteryIndicator}>
+            <View style={[styles.batteryFill, { width: `${batteryLevel || 0}%` }]} />
+          </View>
+        </View>
+
+        {/* Courses Grid */}
+        <View style={styles.coursesSection}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Available Courses</Text>
+            <View style={styles.courseCountBadge}>
+              <Text style={styles.courseCountText}>{courses.length}</Text>
+            </View>
+          </View>
+
+          <FlatList
+            data={courses}
+            keyExtractor={(item) => item._id || item.id}
+            numColumns={2}
+            columnWrapperStyle={styles.columnWrapper}
+            scrollEnabled={false}
+            renderItem={({ item }) => (
+              <TouchableOpacity
+                style={[
+                  styles.courseCard,
+                  isBatterySaverOn && styles.batterySaverCard,
+                ]}
+                activeOpacity={0.8}
+                onPress={() =>
+                  navigation.navigate("CourseScreen", {
+                    courseId: item._id || item.id,
+                  })
+                }
+              >
+                <Image
+                  source={{
+                    uri:
+                      item.thumbnail ||
+                      "https://images.unsplash.com/photo-1516321318423-f06f85e504b3",
+                  }}
+                  style={styles.thumbnail}
+                />
+
+                <View style={styles.courseOverlay}>
+                  <View style={styles.courseTag}>
+                    <Text style={styles.courseTagText}>
+                      {item.level || "Beginner"}
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.courseContent}>
+                  <Text style={styles.courseTitle} numberOfLines={1}>
+                    {item.title}
+                  </Text>
+
+                  <Text style={styles.courseDescription} numberOfLines={2}>
+                    {item.description || "Learn the fundamentals and advance your skills"}
+                  </Text>
+
+                  <View style={styles.courseMeta}>
+                    <View style={styles.metaItem}>
+                      <BookOpen size={12} color="#888" />
+                      <Text style={styles.metaText}>
+                        {item.videoCount || item.videos?.length || 0} lessons
+                      </Text>
+                    </View>
+
+                    <View style={styles.metaItem}>
+                      <Clock size={12} color="#888" />
+                      <Text style={styles.metaText}>
+                        {item.duration || "8h"}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.courseFooter}>
+                    <Text style={styles.coursePrice}>
+                      {item.price ? `$${item.price}` : "Free"}
+                    </Text>
+
+                    <View style={styles.startButton}>
+                      <PlayCircle size={14} color="#fff" />
+                      <Text style={styles.startButtonText}>Start</Text>
+                    </View>
+                  </View>
+
+                  {/* Students count indicator */}
+                  <View style={styles.studentsIndicator}>
+                    <Users size={10} color="#bb86fc" />
+                    <Text style={styles.studentsText}>
+                      {item.students || "1.2k"} students
+                    </Text>
+                  </View>
+                </View>
+
+                {isBatterySaverOn && (
+                  <View style={styles.batterySaverIndicator}>
+                    <Zap size={12} color="#bb86fc" />
+                  </View>
+                )}
+              </TouchableOpacity>
+            )}
+          />
+        </View>
+      </ScrollView>
     </View>
   );
 };
@@ -221,70 +304,246 @@ export default HomePage;
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    paddingTop: "50%",
-    backgroundColor: "#0a1929",
-    padding: 16,
+    backgroundColor: "#0a0a0a",
+  },
+  scrollContent: {
+    paddingBottom: 30,
+    
+    paddingTop:32,
   },
   center: {
     flex: 1,
-    backgroundColor: "#0a1929",
+    backgroundColor: "#0a0a0a",
     justifyContent: "center",
     alignItems: "center",
+  },
+  loadingContent: {
+    alignItems: "center",
+  },
+  loadingText: {
+    color: "#bb86fc",
+    marginTop: 12,
+    fontSize: 16,
+    fontWeight: "500",
+  },
+  errorCard: {
+    backgroundColor: '#1a1a1a',
+    padding: 32,
+    borderRadius: 20,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#2a2a2a',
+  },
+  errorText: {
+    color: "#f87171",
+    fontSize: 16,
+    marginTop: 12,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  errorHint: {
+    color: "#888",
+    fontSize: 13,
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  retryBtn: {
+    backgroundColor: '#7c3aed',
+    paddingVertical: 10,
+    paddingHorizontal: 24,
+    borderRadius: 10,
+  },
+  retryBtnText: {
+    color: '#fff',
+    fontWeight: '600',
+  },
+  emptyCard: {
+    backgroundColor: '#1a1a1a',
+    padding: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#2a2a2a',
+    gap: 12,
+  },
+  emptyText: {
+    color: "#888",
+    fontSize: 16,
+  },
+  headerSection: {
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 8,
+  },
+  welcomeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  welcomeAccent: {
+    width: 4,
+    height: 40,
+    backgroundColor: '#bb86fc',
+    borderRadius: 2,
   },
   heading: {
     fontSize: 28,
     fontWeight: "bold",
     color: "#fff",
-    marginBottom: 6,
+    marginBottom: 4,
   },
   subHeading: {
-    color: "#9ca3af",
-    marginBottom: 20,
+    color: "#888",
+    fontSize: 14,
   },
-  loadingText: {
-    color: "#e5e7eb",
-    marginTop: 12,
+  batteryCard: {
+    backgroundColor: '#1a1a1a',
+    marginHorizontal: 16,
+    marginVertical: 16,
+    padding: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#2a2a2a',
   },
-  errorText: {
-    color: "#f87171",
+  batteryIconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  batteryIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  batteryIconText: {
+    fontSize: 20,
+  },
+  batteryInfo: {
+    marginBottom: 12,
+  },
+  batteryLabel: {
+    color: '#888',
+    fontSize: 12,
+    marginBottom: 4,
+  },
+  batteryLevelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  batteryPercentage: {
+    color: '#fff',
+    fontSize: 24,
+    fontWeight: '700',
+  },
+  batteryStatusBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  batteryStatusText: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  batteryIndicator: {
+    height: 4,
+    backgroundColor: '#0a0a0a',
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  batteryFill: {
+    height: '100%',
+    backgroundColor: '#bb86fc',
+    borderRadius: 2,
+  },
+  coursesSection: {
+    paddingHorizontal: 16,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  sectionTitle: {
+    color: '#fff',
     fontSize: 18,
+    fontWeight: '700',
   },
-  errorHint: {
-    color: "#9ca3af",
-    marginTop: 6,
+  courseCountBadge: {
+    backgroundColor: '#7c3aed',
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
   },
-  emptyText: {
-    color: "#fff",
-    fontSize: 18,
+  courseCountText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
   },
-  card: {
+  columnWrapper: {
+    gap: 12,
+    marginBottom: 12,
+  },
+  courseCard: {
     flex: 1,
-    backgroundColor: "#1e2f4a",
+    backgroundColor: '#1a1a1a',
     borderRadius: 16,
     overflow: "hidden",
-    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: '#2a2a2a',
+    position: 'relative',
+  },
+  batterySaverCard: {
+    opacity: 0.85,
   },
   thumbnail: {
-    height: 120,
+    height: 100,
     width: "100%",
   },
-  cardBody: {
+  courseOverlay: {
+    position: 'absolute',
+    top: 8,
+    left: 8,
+    right: 8,
+    flexDirection: 'row',
+    justifyContent: 'flex-start',
+  },
+  courseTag: {
+    backgroundColor: 'rgba(187, 134, 252, 0.9)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  courseTagText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  courseContent: {
     padding: 12,
   },
-  title: {
+  courseTitle: {
     color: "#fff",
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: "bold",
+    marginBottom: 4,
   },
-  description: {
-    color: "#d1d5db",
-    fontSize: 12,
-    marginVertical: 6,
+  courseDescription: {
+    color: "#888",
+    fontSize: 11,
+    lineHeight: 15,
+    marginBottom: 8,
   },
-  metaRow: {
+  courseMeta: {
     flexDirection: "row",
-    justifyContent: "space-between",
-    marginTop: 6,
+    gap: 12,
+    marginBottom: 8,
   },
   metaItem: {
     flexDirection: "row",
@@ -292,45 +551,50 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   metaText: {
-    color: "#9ca3af",
-    fontSize: 12,
+    color: "#888",
+    fontSize: 10,
   },
-  footer: {
+  courseFooter: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginTop: 10,
+    marginBottom: 6,
   },
-  price: {
-    color: "#fff",
-    fontSize: 18,
+  coursePrice: {
+    color: "#bb86fc",
+    fontSize: 16,
     fontWeight: "bold",
   },
-  startBtn: {
+  startButton: {
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
-    backgroundColor: "#3b82f6",
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    backgroundColor: "#7c3aed",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
     borderRadius: 8,
   },
-  startText: {
+  startButtonText: {
     color: "#fff",
-    fontSize: 12,
+    fontSize: 10,
+    fontWeight: "600",
   },
-  batteryBox: {
-    backgroundColor: "#16263b",
-    padding: 12,
-    borderRadius: 12,
-    marginBottom: 20,
-  },
-  batteryText: {
-    color: "#fff",
-    fontSize: 14,
-  },
-  batteryStatus: {
+  studentsIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
     marginTop: 4,
-    fontWeight: "bold",
+  },
+  studentsText: {
+    color: '#888',
+    fontSize: 9,
+  },
+  batterySaverIndicator: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    borderRadius: 10,
+    padding: 4,
   },
 });

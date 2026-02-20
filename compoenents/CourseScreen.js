@@ -11,7 +11,7 @@ import {
 } from "react-native";
 import { useRoute, useNavigation } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
-import VideoPlayerScreen from "./VideoPlayerScreen";
+
 const CourseScreen = () => {
   const route = useRoute();
   const navigation = useNavigation();
@@ -56,8 +56,10 @@ const CourseScreen = () => {
   if (loading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator size="large" color="#3b82f6" />
-        <Text style={styles.loadingText}>Loading course...</Text>
+        <View style={styles.loadingContent}>
+          <ActivityIndicator size="large" color="#bb86fc" />
+          <Text style={styles.loadingText}>Loading course...</Text>
+        </View>
       </View>
     );
   }
@@ -65,13 +67,16 @@ const CourseScreen = () => {
   if (error || !course) {
     return (
       <View style={styles.center}>
-        <Text style={styles.errorText}>{error || "Course not found"}</Text>
-        <TouchableOpacity
-          style={styles.backBtn}
-          onPress={() => navigation.goBack()}
-        >
-          <Text style={styles.backBtnText}>Go Back</Text>
-        </TouchableOpacity>
+        <View style={styles.errorCard}>
+          <Ionicons name="alert-circle" size={48} color="#bb86fc" />
+          <Text style={styles.errorText}>{error || "Course not found"}</Text>
+          <TouchableOpacity
+            style={styles.backBtn}
+            onPress={() => navigation.goBack()}
+          >
+            <Text style={styles.backBtnText}>Go Back</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     );
   }
@@ -88,183 +93,363 @@ const CourseScreen = () => {
             videoId,
           })
         }
+        activeOpacity={0.7}
       >
-        <View style={styles.playIcon}>
-          <Ionicons name="play-circle-outline" size={32} color="#60a5fa" />
+        <View style={styles.videoCardLeft}>
+          <View style={styles.videoIconContainer}>
+            <Ionicons name="play" size={24} color="#bb86fc" />
+          </View>
+          
+          <View style={styles.videoInfo}>
+            <View style={styles.lessonBadge}>
+              <Text style={styles.lessonText}>Lesson {index + 1}</Text>
+            </View>
+            <Text style={styles.videoTitle}>{item.title}</Text>
+            <Text style={styles.videoDesc} numberOfLines={2}>
+              {item.description || "No description available"}
+            </Text>
+            
+            <View style={styles.videoMetaRow}>
+              <View style={styles.videoMetaItem}>
+                <Ionicons name="time-outline" size={12} color="#888" />
+                <Text style={styles.videoMetaText}>{item.duration || "10:30"}</Text>
+              </View>
+              {item.quality && (
+                <View style={styles.videoMetaItem}>
+                  <Ionicons name="settings-outline" size={12} color="#888" />
+                  <Text style={styles.videoMetaText}>{item.quality}</Text>
+                </View>
+              )}
+            </View>
+          </View>
         </View>
 
-        <View style={{ flex: 1 }}>
-          <Text style={styles.lesson}>Lesson {index + 1}</Text>
-          <Text style={styles.videoTitle}>{item.title}</Text>
-          <Text style={styles.videoDesc} numberOfLines={2}>
-            {item.description}
-          </Text>
+        <View style={styles.playButton}>
+          <Ionicons name="play-circle" size={32} color="#bb86fc" />
         </View>
-
-        <Text style={styles.duration}>{item.duration || "10:30"}</Text>
       </TouchableOpacity>
     );
   };
 
   return (
-    <ScrollView style={styles.container}>
-      {/* Back */}
-      <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backRow}>
-        <Ionicons name="chevron-back" size={22} color="#ccc" />
-        <Text style={styles.backText}>Back to Courses</Text>
-      </TouchableOpacity>
+    <View style={styles.container}>
+      <ScrollView 
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.scrollContent}
+      >
+        {/* Back Button */}
+        <TouchableOpacity 
+          onPress={() => navigation.goBack()} 
+          style={styles.backRow}
+          activeOpacity={0.7}
+        >
+          <View style={styles.backIconContainer}>
+            <Ionicons name="chevron-back" size={22} color="#bb86fc" />
+          </View>
+          <Text style={styles.backText}>Back to Courses</Text>
+        </TouchableOpacity>
 
-      {/* Course Header */}
-      <View style={styles.header}>
-        <Image
-          source={{
-            uri:
-              course.thumbnail ||
-              "https://images.unsplash.com/photo-1516321318423-f06f85e504b3",
-          }}
-          style={styles.thumbnail}
-        />
+        {/* Course Header Card */}
+        <View style={styles.headerCard}>
+          <Image
+            source={{
+              uri:
+                course.thumbnail ||
+                "https://images.unsplash.com/photo-1516321318423-f06f85e504b3",
+            }}
+            style={styles.thumbnail}
+          />
 
-        <Text style={styles.title}>{course.title}</Text>
-        <Text style={styles.desc}>{course.description}</Text>
+          <View style={styles.headerContent}>
+            <Text style={styles.title}>{course.title}</Text>
+            <Text style={styles.desc}>{course.description}</Text>
 
-        <View style={styles.metaRow}>
-          <Text style={styles.meta}>{videos.length} Videos</Text>
-          <Text style={styles.meta}>{course.duration || "Self-paced"}</Text>
-          <Text style={styles.level}>{course.level || "Beginner"}</Text>
+            <View style={styles.metaGrid}>
+              <View style={styles.metaItem}>
+                <Ionicons name="videocam-outline" size={16} color="#bb86fc" />
+                <Text style={styles.metaText}>{videos.length} Videos</Text>
+              </View>
+              
+              <View style={styles.metaItem}>
+                <Ionicons name="time-outline" size={16} color="#bb86fc" />
+                <Text style={styles.metaText}>{course.duration || "Self-paced"}</Text>
+              </View>
+              
+              <View style={[styles.metaItem, styles.levelBadge]}>
+                <Ionicons name="trending-up-outline" size={16} color="#bb86fc" />
+                <Text style={styles.metaText}>{course.level || "Beginner"}</Text>
+              </View>
+            </View>
+          </View>
         </View>
-      </View>
 
-      {/* Videos */}
-      <Text style={styles.sectionTitle}>Course Videos</Text>
+        {/* Videos Section */}
+        <View style={styles.videosSection}>
+          <View style={styles.sectionHeader}>
+            <Ionicons name="list-outline" size={20} color="#bb86fc" />
+            <Text style={styles.sectionTitle}>Course Videos</Text>
+            <View style={styles.videoCountBadge}>
+              <Text style={styles.videoCountText}>{videos.length}</Text>
+            </View>
+          </View>
 
-      {videos.length === 0 ? (
-        <Text style={styles.emptyText}>No videos available</Text>
-      ) : (
-        <FlatList
-          data={videos}
-          keyExtractor={(item) => item._id || item.id}
-          renderItem={renderVideo}
-          scrollEnabled={false}
-        />
-      )}
-    </ScrollView>
+          {videos.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Ionicons name="videocam-off-outline" size={48} color="#2a2a2a" />
+              <Text style={styles.emptyText}>No videos available</Text>
+            </View>
+          ) : (
+            <View style={styles.videoList}>
+              {videos.map((item, index) => (
+                <View key={item._id || item.id}>
+                  {renderVideo({ item, index })}
+                </View>
+              ))}
+            </View>
+          )}
+        </View>
+      </ScrollView>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    paddingTop: "10%",
-    paddingBottom: "2%",
-    backgroundColor: "#0a1929",
-    padding: 16,
+    backgroundColor: "#0a0a0a",
+  },
+  scrollContent: {
+    paddingBottom: 30,
+    paddingTop:32,
   },
   center: {
     flex: 1,
+    backgroundColor: "#0a0a0a",
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "#0a1929",
+  },
+  loadingContent: {
+    alignItems: "center",
   },
   loadingText: {
-    color: "#fff",
-    marginTop: 10,
+    color: "#bb86fc",
+    marginTop: 12,
+    fontSize: 16,
+    fontWeight: "500",
+  },
+  errorCard: {
+    backgroundColor: '#1a1a1a',
+    padding: 32,
+    borderRadius: 20,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#2a2a2a',
   },
   errorText: {
     color: "#f87171",
-    fontSize: 18,
-    marginBottom: 16,
+    fontSize: 16,
+    marginTop: 12,
+    marginBottom: 20,
+    textAlign: 'center',
   },
   backBtn: {
-    backgroundColor: "#3b82f6",
-    padding: 10,
-    borderRadius: 8,
+    backgroundColor: '#7c3aed',
+    paddingVertical: 10,
+    paddingHorizontal: 24,
+    borderRadius: 10,
   },
   backBtnText: {
-    color: "#fff",
+    color: '#fff',
+    fontWeight: '600',
   },
   backRow: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 16,
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 8,
+  },
+  backIconContainer: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#1a1a1a',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8,
   },
   backText: {
-    color: "#ccc",
-    marginLeft: 6,
+    color: "#bb86fc",
+    fontSize: 15,
+    fontWeight: "500",
   },
-  header: {
-    backgroundColor: "#1e2f4a",
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 20,
+  headerCard: {
+    backgroundColor: '#1a1a1a',
+    borderRadius: 20,
+    marginHorizontal: 16,
+    marginTop: 8,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#2a2a2a',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4.65,
+    elevation: 8,
   },
   thumbnail: {
     width: "100%",
-    height: 180,
-    borderRadius: 12,
-    marginBottom: 12,
+    height: 200,
+  },
+  headerContent: {
+    padding: 16,
   },
   title: {
-    fontSize: 22,
+    fontSize: 24,
     fontWeight: "bold",
     color: "#fff",
+    marginBottom: 8,
   },
   desc: {
-    color: "#cbd5e1",
-    marginVertical: 8,
+    color: "#e0e0e0",
+    fontSize: 14,
+    lineHeight: 22,
+    marginBottom: 16,
   },
-  metaRow: {
+  metaGrid: {
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: 12,
-    marginTop: 8,
   },
-  meta: {
-    color: "#94a3b8",
+  metaItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: '#0a0a0a',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    gap: 6,
   },
-  level: {
-    color: "#60a5fa",
+  metaText: {
+    color: "#e0e0e0",
+    fontSize: 13,
+    fontWeight: "500",
+  },
+  levelBadge: {
+    backgroundColor: 'rgba(187, 134, 252, 0.1)',
+  },
+  videosSection: {
+    marginTop: 24,
+    paddingHorizontal: 16,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+    gap: 8,
   },
   sectionTitle: {
     color: "#fff",
-    fontSize: 20,
-    fontWeight: "bold",
-    marginBottom: 12,
+    fontSize: 18,
+    fontWeight: "700",
   },
-  emptyText: {
-    color: "#94a3b8",
-    textAlign: "center",
-    marginTop: 20,
+  videoCountBadge: {
+    backgroundColor: '#7c3aed',
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    marginLeft: 'auto',
+  },
+  videoCountText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  videoList: {
+    gap: 12,
   },
   videoCard: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#1e293b",
-    padding: 14,
-    borderRadius: 14,
-    marginBottom: 12,
+    justifyContent: "space-between",
+    backgroundColor: '#1a1a1a',
+    padding: 12,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#2a2a2a',
   },
-  playIcon: {
+  videoCardLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    flex: 1,
+  },
+  videoIconContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#2a2a2a',
+    justifyContent: 'center',
+    alignItems: 'center',
     marginRight: 12,
   },
-  lesson: {
-    color: "#94a3b8",
-    fontSize: 12,
+  videoInfo: {
+    flex: 1,
+  },
+  lessonBadge: {
+    backgroundColor: 'rgba(187, 134, 252, 0.1)',
+    alignSelf: 'flex-start',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 12,
+    marginBottom: 4,
+  },
+  lessonText: {
+    color: "#bb86fc",
+    fontSize: 10,
+    fontWeight: "600",
   },
   videoTitle: {
     color: "#fff",
     fontSize: 16,
     fontWeight: "600",
+    marginBottom: 2,
   },
   videoDesc: {
-    color: "#94a3b8",
-    fontSize: 13,
-  },
-  duration: {
-    color: "#cbd5e1",
+    color: "#888",
     fontSize: 12,
-    marginLeft: 10,
+    lineHeight: 18,
+    marginBottom: 6,
+  },
+  videoMetaRow: {
+    flexDirection: "row",
+    gap: 12,
+  },
+  videoMetaItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  videoMetaText: {
+    color: "#888",
+    fontSize: 10,
+  },
+  playButton: {
+    marginLeft: 8,
+  },
+  emptyState: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 40,
+    backgroundColor: '#1a1a1a',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#2a2a2a',
+    gap: 12,
+  },
+  emptyText: {
+    color: "#888",
+    fontSize: 14,
   },
 });
-
 
 export default CourseScreen;
