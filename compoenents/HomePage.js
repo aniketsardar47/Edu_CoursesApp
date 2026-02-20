@@ -247,7 +247,7 @@ const HomePage = () => {
                     {item.description || "Learn the fundamentals and advance your skills"}
                   </Text>
 
-                  <View style={styles.courseMeta}>
+                  {/* <View style={styles.courseMeta}>
                     <View style={styles.metaItem}>
                       <BookOpen size={12} color="#888" />
                       <Text style={styles.metaText}>
@@ -261,7 +261,7 @@ const HomePage = () => {
                         {item.duration || "8h"}
                       </Text>
                     </View>
-                  </View>
+                  </View> */}
 
                   <View style={styles.courseFooter}>
                     <Text style={styles.coursePrice}>
@@ -275,12 +275,12 @@ const HomePage = () => {
                   </View>
 
                   {/* Students count indicator */}
-                  <View style={styles.studentsIndicator}>
+                  {/* <View style={styles.studentsIndicator}>
                     <Users size={10} color="#bb86fc" />
                     <Text style={styles.studentsText}>
                       {item.students || "1.2k"} students
                     </Text>
-                  </View>
+                  </View> */}
                 </View>
 
                 {isBatterySaverOn && (

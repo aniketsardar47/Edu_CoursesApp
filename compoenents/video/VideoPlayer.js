@@ -35,6 +35,8 @@ const VideoPlayer = () => {
   const [descriptionText, setDescriptionText] = useState("");
   const [loadingDescription, setLoadingDescription] = useState(false);
   const [showFullDesc, setShowFullDesc] = useState(false);
+  const [playbackPosition, setPlaybackPosition] = useState(0);
+  const [shouldResume, setShouldResume] = useState(false);
 
   const [batterySaverOn, setBatterySaverOn] = useState(false);
   
@@ -42,27 +44,28 @@ const VideoPlayer = () => {
   const speed = batterySaverOn ? 0 : rawSpeed;
 
    useEffect(() => {
-    Battery.getBatteryLevelAsync().then((level) => {
-      const percent = Math.round(level * 100);
-      if (percent <= 20) {
-        setBatterySaverOn(true);
-        setQuality("240p");
-      }
-    });
+  Battery.getBatteryLevelAsync().then((level) => {
+    const percent = Math.round(level * 100);
+    if (percent <= 20) {
+      setBatterySaverOn(true);
+      setQuality("240p");
+    } else {
+      setBatterySaverOn(false);
+    }
+  });
 
-    const sub = Battery.addBatteryLevelListener(({ batteryLevel }) => {
-      const percent = Math.round(batteryLevel * 100);
-      if (percent <= 20) {
-        setBatterySaverOn(true);
-        setQuality("240p");
-        videoRef.current?.pauseAsync();
-      } else {
-        setBatterySaverOn(false);
-      }
-    });
+  const sub = Battery.addBatteryLevelListener(({ batteryLevel }) => {
+    const percent = Math.round(batteryLevel * 100);
+    if (percent <= 20) {
+      setBatterySaverOn(true);
+      setQuality("240p"); // ✅ force 240p
+    } else {
+      setBatterySaverOn(false);
+    }
+  });
 
-    return () => sub.remove();
-  }, []);
+  return () => sub.remove();
+}, []);
 
   useEffect(() => {
     if (!courseId || !videoId) return;
@@ -171,20 +174,26 @@ const VideoPlayer = () => {
       >
         {/* Video Player */}
         <View style={[styles.videoWrapper, batterySaverOn && styles.batterySaverVideo]}>
-          <Video
-            ref={videoRef}
-            source={{ uri: sourceUri }}
-            style={styles.video}
-            useNativeControls
-            resizeMode="contain"
-            shouldPlay={!batterySaverOn && isFocused}
+        <Video
+          ref={videoRef}
+          source={{ uri: sourceUri }}
+          style={styles.video}
+          useNativeControls
+          resizeMode="contain"
+          shouldPlay={isFocused}
+          onPlaybackStatusUpdate={(status) => {
+            if (status.isLoaded) {
+              setPlaybackPosition(status.positionMillis);
+            }
+          }}
+          onLoad={() => {
+            if (shouldResume && playbackPosition > 0) {
+              videoRef.current?.setPositionAsync(playbackPosition);
+              videoRef.current?.playAsync();
+              setShouldResume(false);
+            }
+          }}
           />
-          {batterySaverOn && (
-            <View style={styles.batterySaverOverlay}>
-              <Ionicons name="battery-dead" size={32} color="#bb86fc" />
-              <Text style={styles.batterySaverText}>Battery Saver Mode Active</Text>
-            </View>
-          )}
         </View>
 
         {/* Title Section */}
@@ -242,7 +251,10 @@ const VideoPlayer = () => {
                   quality === q && styles.activeQuality,
                   batterySaverOn && styles.disabledQuality,
                 ]}
-                onPress={() => setQuality(q)}
+                onPress={() => {
+                  setShouldResume(true);
+                  setQuality(q);
+                }}
               >
                 {quality === q && (
                   <View style={styles.qualityIndicator}>
@@ -265,8 +277,11 @@ const VideoPlayer = () => {
                 <Ionicons name="speedometer-outline" size={20} color="#bb86fc" />
               </View>
               <View style={styles.speedInfo}>
-                <Text style={styles.speedLabel}>Current Speed</Text>
-                <Text style={styles.speedValue}>{speed.toFixed(1)} Mbps</Text>
+                <Text style={styles.speedLabel}>Network Speed</Text>
+                {/* Multiply Mbps by 1000 to get kbps */}
+                <Text style={styles.speedValue}>
+                  {Math.round(speed * 100)} kbps
+                </Text>
               </View>
             </View>
           )}

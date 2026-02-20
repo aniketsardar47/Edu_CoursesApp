@@ -172,7 +172,7 @@ const CourseScreen = () => {
               
               <View style={styles.metaItem}>
                 <Ionicons name="time-outline" size={16} color="#bb86fc" />
-                <Text style={styles.metaText}>{course.duration || "Self-paced"}</Text>
+                <Text style={styles.metaText}>{course.duration || "Self-placed"}</Text>
               </View>
               
               <View style={[styles.metaItem, styles.levelBadge]}>

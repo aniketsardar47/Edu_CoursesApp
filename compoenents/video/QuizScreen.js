@@ -102,14 +102,18 @@ const styles = StyleSheet.create({
   },
   nextBtn: {
     marginTop: 20,
-    backgroundColor: "#22c55e",
+    backgroundColor: "#7c3aed",
     padding: 14,
     borderRadius: 12,
     alignItems: "center",
   },
   nextBtnText: {
-    color: "#000",
+    color: "#FFFF",
     fontWeight: "bold",
     fontSize: 16,
   },
 });
+
+
+
+

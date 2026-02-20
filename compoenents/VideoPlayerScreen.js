@@ -35,30 +35,32 @@ const VideoPlayerScreen = () => {
 
   /* ================= BATTERY ================= */
   useEffect(() => {
-    Battery.getBatteryLevelAsync().then((level) => {
-      const percent = Math.round(level * 100);
-      setBatteryLevel(percent);
-      setBatterySaverOn(percent <= 20);
+  Battery.getBatteryLevelAsync().then((level) => {
+    const percent = Math.round(level * 100);
+    setBatteryLevel(percent);
 
-      if (percent <= 20) {
-        setQuality("240p");
-      }
-    });
+    if (percent <= 20) {
+      setBatterySaverOn(true);
+      setQuality("240p");
+    } else {
+      setBatterySaverOn(false);
+    }
+  });
 
-    const sub = Battery.addBatteryLevelListener(({ batteryLevel }) => {
-      const percent = Math.round(batteryLevel * 100);
-      setBatteryLevel(percent);
+  const sub = Battery.addBatteryLevelListener(({ batteryLevel }) => {
+    const percent = Math.round(batteryLevel * 100);
+    setBatteryLevel(percent);
 
-      if (percent <= 20) {
-        setBatterySaverOn(true);
-        setQuality("240p");
-      } else {
-        setBatterySaverOn(false);
-      }
-    });
+    if (percent <= 20) {
+      setBatterySaverOn(true);
+      setQuality("240p");
+    } else {
+      setBatterySaverOn(false);
+    }
+  });
 
-    return () => sub.remove();
-  }, []);
+  return () => sub.remove();
+}, []);
 
   /* ================= FETCH DATA ================= */
   useEffect(() => {
@@ -225,7 +227,7 @@ const VideoPlayerScreen = () => {
               source={{ uri: currentVideoUrl }}
               useNativeControls
               resizeMode={ResizeMode.CONTAIN}
-              shouldPlay={!batterySaverOn && isFocused}
+              shouldPlay={isFocused}
               style={styles.video}
               onPlaybackStatusUpdate={(status) => {
                 if (status.isLoaded) {
@@ -234,12 +236,12 @@ const VideoPlayerScreen = () => {
               }}
               onReadyForDisplay={onReadyForDisplay}
             />
-            {batterySaverOn && (
+            {/* {batterySaverOn && (
               <View style={styles.batterySaverOverlay}>
                 <Ionicons name="battery-dead" size={32} color="#bb86fc" />
                 <Text style={styles.batterySaverText}>Battery Saver Mode Active</Text>
               </View>
-            )}
+            )} */}
           </View>
         </View>
 
@@ -279,7 +281,7 @@ const VideoPlayerScreen = () => {
         </View>
 
         {/* Description Card */}
-        <View style={styles.descriptionCard}>
+        {/* <View style={styles.descriptionCard}>
           <View style={styles.descriptionHeader}>
             <Ionicons name="document-text-outline" size={18} color="#bb86fc" />
             <Text style={styles.descriptionHeaderText}>DESCRIPTION</Text>
@@ -290,7 +292,7 @@ const VideoPlayerScreen = () => {
               {videoData.description || "No description available."}
             </Text>
           </View>
-        </View>
+        </View> */}
 
         {/* Course Videos Section */}
         <View style={styles.playlistSection}>
@@ -579,37 +581,37 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '700',
   },
-  descriptionCard: {
-    backgroundColor: '#1a1a1a',
-    borderRadius: 16,
-    marginHorizontal: 16,
-    marginTop: 16,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#2a2a2a',
-  },
-  descriptionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 12,
-  },
-  descriptionHeaderText: {
-    color: "#bb86fc",
-    fontSize: 13,
-    fontWeight: "700",
-    letterSpacing: 1,
-  },
-  descriptionContent: {
-    backgroundColor: '#0a0a0a',
-    borderRadius: 12,
-    padding: 12,
-  },
-  description: {
-    color: "#e0e0e0",
-    fontSize: 14,
-    lineHeight: 22,
-  },
+  // descriptionCard: {
+  //   backgroundColor: '#1a1a1a',
+  //   borderRadius: 16,
+  //   marginHorizontal: 16,
+  //   marginTop: 16,
+  //   padding: 16,
+  //   borderWidth: 1,
+  //   borderColor: '#2a2a2a',
+  // },
+  // descriptionHeader: {
+  //   flexDirection: 'row',
+  //   alignItems: 'center',
+  //   gap: 8,
+  //   marginBottom: 12,
+  // },
+  // descriptionHeaderText: {
+  //   color: "#bb86fc",
+  //   fontSize: 13,
+  //   fontWeight: "700",
+  //   letterSpacing: 1,
+  // },
+  // descriptionContent: {
+  //   backgroundColor: '#0a0a0a',
+  //   borderRadius: 12,
+  //   padding: 12,
+  // },
+  // description: {
+  //   color: "#e0e0e0",
+  //   fontSize: 14,
+  //   lineHeight: 22,
+  // },
   playlistSection: {
     marginTop: 20,
     paddingHorizontal: 16,
