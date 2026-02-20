@@ -13,7 +13,7 @@ const Stack = createNativeStackNavigator();
 export default function Body() {
   return (
     <NavigationContainer>
-      <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Navigator screenOptions={{ headerShown: false,lazy: true }}>
         <Stack.Screen name="Home" component={HomePage} />
         <Stack.Screen name="CourseScreen" component={CourseScreen} />
         <Stack.Screen name="VideoPlayerScreen" component={VideoPlayerScreen} /> 

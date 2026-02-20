@@ -125,7 +125,7 @@ const HomePage = () => {
           ]}
         >
           {isBatterySaverOn
-            ? "Battery Saver ON (Auto ≤ 20%)"
+            ? "Battery Saver ON"
             : "Battery Saver OFF"}
         </Text>
       </View>

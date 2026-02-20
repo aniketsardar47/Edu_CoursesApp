@@ -10,7 +10,6 @@ import {
   Dimensions,
   Alert,
 } from "react-native";
-// Import useIsFocused
 import { useRoute, useNavigation, useIsFocused } from "@react-navigation/native"; 
 import { Video } from "expo-av";
 import { downloadVideo } from "../utils/DownloadManager";
@@ -19,14 +18,14 @@ import * as Linking from "expo-linking";
 import * as Sharing from "expo-sharing";
 import { Ionicons } from "@expo/vector-icons";
 import useRealtimeSpeed from "./useRealtimeSpeed";
-import * as Battery from "expo-battery"; // 
+import * as Battery from "expo-battery"; 
 
 const { width } = Dimensions.get("window");
 
 const VideoPlayer = () => {
   const route = useRoute();
   const navigation = useNavigation();
-  const isFocused = useIsFocused(); // Track focus state
+  const isFocused = useIsFocused(); 
   const { courseId, videoId } = route.params;
 
   const videoRef = useRef(null);
@@ -37,10 +36,8 @@ const VideoPlayer = () => {
   const [loadingDescription, setLoadingDescription] = useState(false);
   const [showFullDesc, setShowFullDesc] = useState(false);
 
-  // 🔋 Battery saver state (ADDED)
   const [batterySaverOn, setBatterySaverOn] = useState(false);
   
-    // ⚠️ Speed hook MUST always be called
   const rawSpeed = useRealtimeSpeed(3000) ?? 0;
   const speed = batterySaverOn ? 0 : rawSpeed;
 
@@ -165,6 +162,7 @@ const VideoPlayer = () => {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 140 }}>
+      {/* 1. VIDEO PLAYER FIRST */}
       <View style={[styles.videoWrapper, batterySaverOn && { opacity: 0.4 }]}>
         <Video
           ref={videoRef}
@@ -172,10 +170,25 @@ const VideoPlayer = () => {
           style={styles.video}
           useNativeControls
           resizeMode="contain"
-          shouldPlay={!batterySaverOn && isFocused} // 🔥 CONTROLLED
+          shouldPlay={!batterySaverOn && isFocused} 
         />
       </View>
 
+      {/* 2. TEXT CONTENT (Description & Title) - TEXT FIRST LAYOUT */}
+      <View style={styles.card}>
+        <Text style={[styles.sectionTitle, { fontSize: 18, color: '#fff', marginBottom: 4 }]}>
+          {videoData.title || "Video Lesson"}
+        </Text>
+        <Text style={[styles.sectionTitle, { marginTop: 10 }]}>DESCRIPTION</Text>
+        <Text numberOfLines={5} style={styles.descriptionText}>{descriptionText}</Text>
+        {descriptionText.length > 200 && (
+          <TouchableOpacity onPress={() => setShowFullDesc(true)}>
+            <Text style={styles.readMore}>Read more</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {/* 3. DOWNLOAD & SHARE ACTIONS */}
       <View style={styles.actionRow}>
         <TouchableOpacity
           style={styles.actionBtn}
@@ -203,7 +216,7 @@ const VideoPlayer = () => {
         </TouchableOpacity>
       </View>
 
-       {/* QUALITY */}
+       {/* 4. QUALITY SELECTOR */}
       <View style={styles.card}>
         <Text style={styles.sectionTitle}>SELECT QUALITY</Text>
         <View style={styles.buttonRow}>
@@ -232,16 +245,7 @@ const VideoPlayer = () => {
         )}
       </View>
 
-      <View style={styles.card}>
-        <Text style={styles.sectionTitle}>DESCRIPTION</Text>
-        <Text numberOfLines={5} style={styles.descriptionText}>{descriptionText}</Text>
-        {descriptionText.length > 200 && (
-          <TouchableOpacity onPress={() => setShowFullDesc(true)}>
-            <Text style={styles.readMore}>Read more</Text>
-          </TouchableOpacity>
-        )}
-      </View>
-
+      {/* 5. ATTACHMENTS */}
       {Array.isArray(videoData.attachments) &&
         videoData.attachments.map((f) => (
           <View key={f._id} style={styles.attachmentRow}>
@@ -255,6 +259,7 @@ const VideoPlayer = () => {
           </View>
         ))}
 
+      {/* 6. QUIZ ACTION */}
       {videoData.quiz?.length > 0 && (
         <TouchableOpacity style={styles.quizBtn} onPress={() => navigation.navigate("QuizScreen", { quiz: videoData.quiz })}>
           <Ionicons name="help-circle-outline" size={20} color="#fff" />
@@ -262,6 +267,7 @@ const VideoPlayer = () => {
         </TouchableOpacity>
       )}
 
+      {/* MODAL */}
       <Modal visible={showFullDesc} transparent animationType="fade" onRequestClose={() => setShowFullDesc(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalBox}>
@@ -277,7 +283,6 @@ const VideoPlayer = () => {
   );
 };
 
-// Styles remain exactly the same as your original code...
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#0a1929", padding: 16, paddingTop: 40 },
   loadingContainer: { flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "#0a1929" },
@@ -315,6 +320,6 @@ const styles = StyleSheet.create({
   modalScrollView: { flex: 1, marginVertical: 15 },
   closeBtn: { marginTop: 16, alignSelf: "center", paddingVertical: 8, paddingHorizontal: 24, backgroundColor: "#2563eb", borderRadius: 10 },
   closeText: { color: "#fff", fontWeight: "bold" },
-});
+}); 
 
 export default VideoPlayer;
