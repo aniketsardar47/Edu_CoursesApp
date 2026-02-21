@@ -19,6 +19,7 @@ import * as Sharing from "expo-sharing";
 import { Ionicons } from "@expo/vector-icons";
 import useRealtimeSpeed from "./useRealtimeSpeed";
 import * as Battery from "expo-battery"; 
+import { BlurView } from 'expo-blur';
 import { useDispatch } from "react-redux"; // ADD THIS
 import { addDownload } from "../redux/DownloadSlice";
 import { createDownloadResumable,encryptFile } from "../utils/DownloadManager";
@@ -41,6 +42,8 @@ const VideoPlayer = () => {
   const [showFullDesc, setShowFullDesc] = useState(false);
   const [playbackPosition, setPlaybackPosition] = useState(0);
   const [shouldResume, setShouldResume] = useState(false);
+  const [isIdle, setIsIdle] = useState(false);
+  const idleTimerRef = useRef(null);
 
   const [downloadProgress, setDownloadProgress] = useState(0); // 0 to 1
   const [isDownloading, setIsDownloading] = useState(false);
@@ -49,6 +52,38 @@ const VideoPlayer = () => {
   
   const rawSpeed = useRealtimeSpeed(3000) ?? 0;
   const speed = batterySaverOn ? 0 : rawSpeed;
+
+  const resetIdleTimer = () => {
+    // If it was blurred, remove blur and play
+    if (isIdle) {
+      setIsIdle(false);
+      videoRef.current?.playAsync();
+    }
+
+    // Clear existing timer
+    if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+
+    // Set new timer for 10 seconds
+    idleTimerRef.current = setTimeout(() => {
+      handleInactivity();
+    }, 10000); 
+  };
+
+  const handleInactivity = () => {
+    setIsIdle(true);
+    // Pause video after the 3-second delay you requested
+    setTimeout(() => {
+      videoRef.current?.pauseAsync();
+    }, 300);
+  };
+
+  // Initialize timer on mount
+  useEffect(() => {
+    resetIdleTimer();
+    return () => {
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+    };
+  }, []);
 
    useEffect(() => {
   Battery.getBatteryLevelAsync().then((level) => {
@@ -211,10 +246,9 @@ const VideoPlayer = () => {
     setIsDownloading(false);
   }
 };
-
-
+  
   return (
-    <View style={styles.container}>
+    <View style={styles.container} onTouchStart={resetIdleTimer}>
       <ScrollView 
         style={styles.scrollView} 
         contentContainerStyle={styles.scrollContent}
@@ -242,6 +276,14 @@ const VideoPlayer = () => {
             }
           }}
           />
+          {isIdle && (
+            <BlurView intensity={80} tint="dark" style={StyleSheet.absoluteFill}>
+              <View style={styles.idleOverlay}>
+                <Ionicons name="play-circle" size={80} color="white" opacity={0.8} />
+                <Text style={styles.idleText}>Tap to Resume Learning</Text>
+              </View>
+            </BlurView>
+          )}
         </View>
 
         {/* Title Section */}
@@ -452,7 +494,15 @@ const VideoPlayer = () => {
             </View>
           </View>
         </Modal>
+
       </ScrollView>
+      {isIdle && (
+        <BlurView 
+            intensity={60} 
+            tint="dark" 
+            style={[StyleSheet.absoluteFill, {zIndex: 999}]} 
+        />
+      )}
     </View>
   );
 };
@@ -845,6 +895,17 @@ const styles = StyleSheet.create({
   disabledBtn: {
     opacity: 0.8, // Less transparent so the progress is visible
   },
+  idleOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  idleText: {
+    color: 'white',
+    marginTop: 10,
+    fontSize: 16,
+    fontWeight: '600',
+  }
 });
 
 export default VideoPlayer;
