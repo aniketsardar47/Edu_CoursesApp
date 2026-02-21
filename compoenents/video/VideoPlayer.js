@@ -21,7 +21,7 @@ import useRealtimeSpeed from "./useRealtimeSpeed";
 import * as Battery from "expo-battery"; 
 import { useDispatch } from "react-redux"; // ADD THIS
 import { addDownload } from "../redux/DownloadSlice";
-import { createDownloadResumable } from "../utils/DownloadManager";
+import { createDownloadResumable,encryptFile } from "../utils/DownloadManager";
 
 const { width } = Dimensions.get("window");
 
@@ -173,45 +173,44 @@ const VideoPlayer = () => {
   }
 
     const handleDownloadAction = async () => {
-    if (isDownloading) return;
+  if (isDownloading) return;
 
-    try {
-      setIsDownloading(true);
-      setDownloadProgress(0);
+  try {
+    setIsDownloading(true);
+    setDownloadProgress(0);
 
-      const downloadUrl = videoData.url;
-      const resumable = createDownloadResumable(
-        downloadUrl,
-        videoData.title,
-        (progress) => {
-          setDownloadProgress(progress);
-        }
-      );
+    const filename = videoData.title.replace(/[^a-z0-9]/gi, "_").toLowerCase();
+    const resumable = createDownloadResumable(
+      videoData.url,
+      filename,
+      (progress) => setDownloadProgress(progress)
+    );
 
-      const result = await resumable.downloadAsync();
+    const result = await resumable.downloadAsync();
 
-      if (result && result.uri) {
-        setLocalUri(result.uri);
+    if (result && result.uri) {
+      // Move to dedicated folder and encrypt
+      const finalUri = await encryptFile(result.uri, filename);
 
+      if (finalUri) {
         dispatch(addDownload({
           id: videoId,
           courseId: courseId,
           title: videoData.title,
-          localUri: result.uri,
+          localUri: finalUri, // This will now be .../CourseDownloads/filename.dat
           thumbnail: videoData.thumbnail || "https://via.placeholder.com/150",
           timestamp: new Date().toISOString(),
         }));
-
-        Alert.alert("Success", "Video downloaded successfully!");
+        Alert.alert("Success", "Video downloaded to secure folder!");
       }
-    } catch (error) {
-      console.error("Download Error:", error);
-      Alert.alert("Error", "Download failed. Please try again.");
-    } finally {
-      setIsDownloading(false);
-      setDownloadProgress(0);
     }
-  };
+  } catch (error) {
+    console.error("Download Error:", error);
+    Alert.alert("Error", "Download failed.");
+  } finally {
+    setIsDownloading(false);
+  }
+};
 
 
   return (

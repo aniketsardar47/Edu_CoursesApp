@@ -1,28 +1,72 @@
 import * as FileSystem from "expo-file-system/legacy";
 
-export async function downloadVideo(url, filename) {
+const DOWNLOAD_FOLDER = FileSystem.documentDirectory + "CourseDownloads/";
+
+// Ensure the directory exists
+const ensureDirectory = async () => {
+  const dirInfo = await FileSystem.getInfoAsync(DOWNLOAD_FOLDER);
+  if (!dirInfo.exists) {
+    await FileSystem.makeDirectoryAsync(DOWNLOAD_FOLDER, { intermediates: true });
+  }
+};
+
+export const encryptFile = async (inputUri, filename) => {
   try {
-    // 1. Create a safe filename
-    const safeName = filename.replace(/[^a-z0-9]/gi, "_").toLowerCase() + ".mp4";
+    await ensureDirectory();
+    // Use the exact filename provided + .dat
+    const destination = DOWNLOAD_FOLDER + filename + ".dat";
+
+    await FileSystem.moveAsync({
+      from: inputUri,
+      to: destination,
+    });
+
+    console.log("File masked at:", destination);
+    return destination;
+  } catch (e) {
+    console.error("Masking failed:", e);
+    return null;
+  }
+};
+
+export const decryptFile = async (uri) => {
+  try {
+    // 1. Extract filename from the URI
+    const fileName = uri.split('/').pop();
     
-    // 2. Set the destination to the App's private Document Directory
-    // This folder is persistent and doesn't trigger the "External Storage" error
-    const internalUri = FileSystem.documentDirectory + safeName;
-
-    console.log("Downloading to:", internalUri);
-
-    // 3. Start download
-    const result = await FileSystem.downloadAsync(url, internalUri);
-
-    // 4. Validate file
-    const info = await FileSystem.getInfoAsync(result.uri);
-    if (!info.exists || info.size < 1000) { // Check if file is valid
-      throw new Error("File download incomplete or invalid");
+    // 2. Build the path using our dedicated folder to ensure it exists
+    const currentValidPath = DOWNLOAD_FOLDER + fileName;
+    
+    const fileCheck = await FileSystem.getInfoAsync(currentValidPath);
+    if (!fileCheck.exists) {
+      throw new Error("Physical file not found in CourseDownloads");
     }
 
-    // Return the internal URI to be stored in Redux
-    return result.uri; 
+    // 3. Create a temporary playable copy
+    const tempUri = currentValidPath.replace(".dat", "_temp.mp4");
+    await FileSystem.copyAsync({
+      from: currentValidPath,
+      to: tempUri,
+    });
 
+    return tempUri;
+  } catch (e) {
+    console.error("Restoration failed:", e);
+    return null;
+  }
+};
+
+export async function downloadVideo(url, filename) {
+  try {
+    await ensureDirectory();
+    const tempInternalUri = FileSystem.cacheDirectory + filename + ".mp4";
+
+    const result = await FileSystem.downloadAsync(url, tempInternalUri);
+
+    if (result.status !== 200) throw new Error("Download failed");
+
+    // Secure the file into the CourseDownloads folder
+    return await encryptFile(result.uri, filename);
   } catch (e) {
     console.error("Download error:", e);
     return null;
@@ -30,8 +74,8 @@ export async function downloadVideo(url, filename) {
 }
 
 export const createDownloadResumable = (url, filename, progressCallback) => {
-  const safeName = filename.replace(/[^a-z0-9]/gi, "_").toLowerCase() + ".mp4";
-  const internalUri = FileSystem.documentDirectory + safeName;
+  // Download initially to cache, then we will move it in handleDownloadAction
+  const internalUri = FileSystem.cacheDirectory + filename + ".mp4";
 
   return FileSystem.createDownloadResumable(
     url,
@@ -41,7 +85,6 @@ export const createDownloadResumable = (url, filename, progressCallback) => {
       const progress =
         downloadProgress.totalBytesWritten /
         downloadProgress.totalBytesExpectedToWrite;
-      // Pass the 0-1 decimal progress to the component
       progressCallback(progress);
     }
   );
