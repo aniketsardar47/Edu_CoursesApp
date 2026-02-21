@@ -12,6 +12,8 @@ import {
 import { useNavigation } from "@react-navigation/native";
 import { BookOpen, Clock, Users, PlayCircle, Zap } from "lucide-react-native";
 import * as Battery from "expo-battery";
+import { useSelector } from "react-redux"; // ✅ Add this
+import { DownloadCloud, ChevronRight } from "lucide-react-native";
 
 const HomePage = () => {
   const navigation = useNavigation();
@@ -19,6 +21,8 @@ const HomePage = () => {
   const [courses, setCourses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  const downloadedVideos = useSelector((state) => state.downloads.videos);
 
   // 🔋 Battery state
   const [batteryLevel, setBatteryLevel] = useState(null);
@@ -193,6 +197,29 @@ const HomePage = () => {
           </View>
         </View>
 
+        {downloadedVideos.length > 0 && (
+          <View style={styles.downloadsContainer}>
+            <TouchableOpacity 
+              style={styles.downloadsButton}
+              activeOpacity={0.7}
+              onPress={() => navigation.navigate("DownloadsList")}
+            >
+              <View style={styles.downloadsLeft}>
+                <View style={styles.downloadIconCircle}>
+                  <DownloadCloud size={20} color="#fff" />
+                </View>
+                <View>
+                  <Text style={styles.downloadsTitle}>Offline Downloads</Text>
+                  <Text style={styles.downloadsCount}>
+                    {downloadedVideos.length} {downloadedVideos.length === 1 ? 'video' : 'videos'} available
+                  </Text>
+                </View>
+              </View>
+              <ChevronRight size={20} color="#bb86fc" />
+            </TouchableOpacity>
+          </View>
+        )}
+        
         {/* Courses Grid */}
         <View style={styles.coursesSection}>
           <View style={styles.sectionHeader}>
@@ -597,4 +624,46 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     padding: 4,
   },
+  downloadsContainer: {
+    paddingHorizontal: 16,
+    marginBottom: 10,
+  },
+  downloadsButton: {
+    backgroundColor: '#1a1a1a',
+    borderRadius: 16,
+    padding: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderWidth: 1,
+    borderColor: '#2a2a2a',
+    elevation: 4,
+    shadowColor: '#bb86fc',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  downloadsLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  downloadIconCircle: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#7c3aed',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  downloadsTitle: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  downloadsCount: {
+    color: '#888',
+    fontSize: 12,
+    marginTop: 2,
+  }
 });

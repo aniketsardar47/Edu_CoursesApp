@@ -19,10 +19,13 @@ import * as Sharing from "expo-sharing";
 import { Ionicons } from "@expo/vector-icons";
 import useRealtimeSpeed from "./useRealtimeSpeed";
 import * as Battery from "expo-battery"; 
+import { useDispatch } from "react-redux"; // ADD THIS
+import { addDownload } from "../redux/DownloadSlice";
 
 const { width } = Dimensions.get("window");
 
 const VideoPlayer = () => {
+  const dispatch = useDispatch();
   const route = useRoute();
   const navigation = useNavigation();
   const isFocused = useIsFocused(); 
@@ -165,6 +168,35 @@ const VideoPlayer = () => {
     );
   }
 
+    const handleDownloadAction = async () => {
+    try {
+      // Use the high-quality URL for the actual download
+      const downloadUrl = videoData.url; 
+      const uri = await downloadVideo(downloadUrl, videoData.title);
+
+      if (uri) {
+        setLocalUri(uri);
+
+        // DISPATCH TO REDUX: Save the path and metadata
+        dispatch(addDownload({
+          id: videoId,
+          courseId: courseId,
+          title: videoData.title,
+          localUri: uri, // The internal Expo file path
+          thumbnail: videoData.thumbnail || "https://via.placeholder.com/150",
+          timestamp: new Date().toISOString(),
+        }));
+
+        Alert.alert("Success", "Video stored in Redux & Local Storage");
+      } else {
+        Alert.alert("Error", "Download failed. Check permissions.");
+      }
+    } catch (error) {
+      console.error("Redux Dispatch Error:", error);
+    }
+  };
+
+
   return (
     <View style={styles.container}>
       <ScrollView 
@@ -206,15 +238,7 @@ const VideoPlayer = () => {
         <View style={styles.actionRow}>
           <TouchableOpacity
             style={styles.actionBtn}
-            onPress={async () => {
-              const uri = await downloadVideo(sourceUri, videoData.title);
-              if (uri) {
-                setLocalUri(uri);
-                Alert.alert("Success", "Video downloaded successfully");
-              } else {
-                Alert.alert("Error", "Download failed");
-              }
-            }}
+            onPress={handleDownloadAction}
           >
             <View style={[styles.actionContent, styles.downloadBtn]}>
               <Ionicons name="download-outline" size={22} color="#fff" />
