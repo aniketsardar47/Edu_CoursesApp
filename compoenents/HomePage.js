@@ -70,7 +70,7 @@ const HomePage = () => {
 
   /* ================= FETCH COURSES ================= */
   useEffect(() => {
-    fetch("http://10.107.25.116:7777/api/courses")
+    fetch("http://10.197.15.102:7777/api/courses")
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
         return res.json();
@@ -110,7 +110,7 @@ const HomePage = () => {
           <Text style={styles.errorHint}>
             Make sure backend is running on port 7777
           </Text>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.retryBtn}
             onPress={() => {
               setLoading(true);
@@ -145,7 +145,7 @@ const HomePage = () => {
 
   return (
     <View style={styles.container}>
-      <ScrollView 
+      <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
       >
@@ -169,7 +169,7 @@ const HomePage = () => {
               <Text style={styles.batteryIconText}>{getBatteryIcon()}</Text>
             </View>
           </View>
-          
+
           <View style={styles.batteryInfo}>
             <Text style={styles.batteryLabel}>
               Battery Level
@@ -191,7 +191,7 @@ const HomePage = () => {
               </View>
             </View>
           </View>
-          
+
           <View style={styles.batteryIndicator}>
             <View style={[styles.batteryFill, { width: `${batteryLevel || 0}%` }]} />
           </View>
@@ -199,7 +199,7 @@ const HomePage = () => {
 
         {downloadedVideos.length > 0 && (
           <View style={styles.downloadsContainer}>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.downloadsButton}
               activeOpacity={0.7}
               onPress={() => navigation.navigate("DownloadsList")}
@@ -219,7 +219,7 @@ const HomePage = () => {
             </TouchableOpacity>
           </View>
         )}
-        
+
         {/* Courses Grid */}
         <View style={styles.coursesSection}>
           <View style={styles.sectionHeader}>
@@ -335,8 +335,8 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingBottom: 30,
-    
-    paddingTop:32,
+
+    paddingTop: 32,
   },
   center: {
     flex: 1,

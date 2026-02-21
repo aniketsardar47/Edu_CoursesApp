@@ -13,6 +13,8 @@ import { useNavigation, useRoute, useIsFocused } from "@react-navigation/native"
 import { Ionicons } from "@expo/vector-icons";
 import { Video, ResizeMode } from "expo-av";
 import * as Battery from "expo-battery";
+import { useDispatch, useSelector } from "react-redux";
+import { updateVideoProgress } from "./redux/VideoProgressSlice";
 
 const VideoPlayerScreen = () => {
   const route = useRoute();
@@ -33,34 +35,59 @@ const VideoPlayerScreen = () => {
   const [batteryLevel, setBatteryLevel] = useState(null);
   const [batterySaverOn, setBatterySaverOn] = useState(false);
 
+  const dispatch = useDispatch();
+  const savedProgress = useSelector(state => state.videoProgress.progressByVideo[videoId]);
+  const lastPositionRef = useRef(0);
+  const watchedMillisRef = useRef(0);
+  const [localWatchedMillis, setLocalWatchedMillis] = useState(0);
+  const [totalDurationMillis, setTotalDurationMillis] = useState(0);
+  const [shouldResume, setShouldResume] = useState(true);
+
+  useEffect(() => {
+    if (savedProgress) {
+      watchedMillisRef.current = savedProgress.watchedSeconds * 1000;
+      setLocalWatchedMillis(savedProgress.watchedSeconds * 1000);
+      setTotalDurationMillis(savedProgress.totalDuration * 1000);
+      lastPositionRef.current = savedProgress.lastPosition;
+      setLastPosition(savedProgress.lastPosition);
+    } else {
+      watchedMillisRef.current = 0;
+      setLocalWatchedMillis(0);
+      setTotalDurationMillis(0);
+      lastPositionRef.current = 0;
+      setLastPosition(0);
+    }
+    setShouldResume(true);
+  }, [videoId]);
+
   /* ================= BATTERY ================= */
   useEffect(() => {
-  Battery.getBatteryLevelAsync().then((level) => {
-    const percent = Math.round(level * 100);
-    setBatteryLevel(percent);
+    Battery.getBatteryLevelAsync().then((level) => {
+      const percent = Math.round(level * 100);
+      setBatteryLevel(percent);
 
-    if (percent <= 20) {
-      setBatterySaverOn(true);
-      setQuality("240p");
-    } else {
-      setBatterySaverOn(false);
-    }
-  });
+      if (percent <= 20) {
+        setBatterySaverOn(true);
+        setQuality("240p");
+      } else {
+        setBatterySaverOn(false);
+      }
+    });
 
-  const sub = Battery.addBatteryLevelListener(({ batteryLevel }) => {
-    const percent = Math.round(batteryLevel * 100);
-    setBatteryLevel(percent);
+    const sub = Battery.addBatteryLevelListener(({ batteryLevel }) => {
+      const percent = Math.round(batteryLevel * 100);
+      setBatteryLevel(percent);
 
-    if (percent <= 20) {
-      setBatterySaverOn(true);
-      setQuality("240p");
-    } else {
-      setBatterySaverOn(false);
-    }
-  });
+      if (percent <= 20) {
+        setBatterySaverOn(true);
+        setQuality("240p");
+      } else {
+        setBatterySaverOn(false);
+      }
+    });
 
-  return () => sub.remove();
-}, []);
+    return () => sub.remove();
+  }, []);
 
   /* ================= FETCH DATA ================= */
   useEffect(() => {
@@ -69,7 +96,7 @@ const VideoPlayerScreen = () => {
         setLoading(true);
 
         const res = await fetch(
-          `http://10.107.25.116:7777/api/videos/course/${courseId}/${videoId}`
+          `http://10.197.15.102:7777/api/videos/course/${courseId}/${videoId}`
         );
 
         if (!res.ok) throw new Error("Video not found");
@@ -77,7 +104,7 @@ const VideoPlayerScreen = () => {
         setVideoData(data);
 
         const listRes = await fetch(
-          `http://10.107.25.116:7777/api/videos/course/${courseId}`
+          `http://10.197.15.102:7777/api/videos/course/${courseId}`
         );
 
         const listData = await listRes.json();
@@ -131,6 +158,10 @@ const VideoPlayerScreen = () => {
   }, [batterySaverOn]);
 
   /* ================= RESUME POSITION ================= */
+  useEffect(() => {
+    setShouldResume(true);
+  }, [currentVideoUrl]);
+
   const onReadyForDisplay = () => {
     if (videoRef.current && lastPosition > 0) {
       videoRef.current.setPositionAsync(lastPosition);
@@ -173,7 +204,7 @@ const VideoPlayerScreen = () => {
 
   return (
     <View style={styles.container}>
-      <ScrollView 
+      <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
       >
@@ -193,15 +224,15 @@ const VideoPlayerScreen = () => {
           <View style={styles.titleAccent} />
           <View style={styles.titleContent}>
             <Text style={styles.title}>{videoData.title}</Text>
-            
+
             {/* Battery and Speed Info in Row */}
             <View style={styles.infoRow}>
               {batteryLevel !== null && (
                 <View style={styles.infoChip}>
-                  <Ionicons 
-                    name={batterySaverOn ? "battery-dead" : "battery-full"} 
-                    size={14} 
-                    color={batterySaverOn ? "#bb86fc" : "#4ade80"} 
+                  <Ionicons
+                    name={batterySaverOn ? "battery-dead" : "battery-full"}
+                    size={14}
+                    color={batterySaverOn ? "#bb86fc" : "#4ade80"}
                   />
                   <Text style={[styles.infoChipText, batterySaverOn && styles.batteryWarning]}>
                     {batteryLevel}% {batterySaverOn ? "(Saver)" : ""}
@@ -229,10 +260,45 @@ const VideoPlayerScreen = () => {
               resizeMode={ResizeMode.CONTAIN}
               shouldPlay={isFocused}
               style={styles.video}
+              progressUpdateIntervalMillis={100}
               onPlaybackStatusUpdate={(status) => {
                 if (status.isLoaded) {
                   setLastPosition(status.positionMillis);
+                  if (status.durationMillis) {
+                    setTotalDurationMillis(status.durationMillis);
+                  }
+
+                  if (status.isPlaying) {
+                    const diff = status.positionMillis - lastPositionRef.current;
+                    if (diff > 0 && diff < 1500) {
+                      watchedMillisRef.current += diff;
+                      setLocalWatchedMillis(watchedMillisRef.current);
+                    }
+
+                    const currentSeconds = Math.floor(watchedMillisRef.current / 1000);
+                    const lastSavedSeconds = savedProgress?.watchedSeconds || 0;
+
+                    if (currentSeconds > lastSavedSeconds + 3) {
+                      dispatch(updateVideoProgress({
+                        videoId,
+                        watchedSeconds: currentSeconds,
+                        totalDuration: Math.floor(status.durationMillis / 1000),
+                        lastPosition: status.positionMillis
+                      }));
+                    }
+                  }
+                  lastPositionRef.current = status.positionMillis;
                 }
+              }}
+              onLoad={() => {
+                const targetPos = lastPosition > 0 ? lastPosition : (savedProgress?.lastPosition || 0);
+                if (shouldResume && targetPos > 0) {
+                  videoRef.current?.setPositionAsync(targetPos);
+                }
+                if (isFocused) {
+                  videoRef.current?.playAsync();
+                }
+                setShouldResume(false);
               }}
               onReadyForDisplay={onReadyForDisplay}
             />
@@ -245,13 +311,42 @@ const VideoPlayerScreen = () => {
           </View>
         </View>
 
+        {/* Learning Progress Card */}
+        <View style={styles.qualityCard}>
+          <View style={styles.qualityHeader}>
+            <Ionicons name="analytics-outline" size={18} color="#bb86fc" />
+            <Text style={styles.qualityHeaderText}>LEARNING PROGRESS</Text>
+          </View>
+
+          <View style={styles.progressContainer}>
+            <View style={styles.learningProgressBarBg}>
+              <View
+                style={[
+                  styles.learningProgressBarFill,
+                  {
+                    width: `${totalDurationMillis > 0 ? Math.min((localWatchedMillis / totalDurationMillis) * 100, 100) : 0}%`
+                  }
+                ]}
+              />
+            </View>
+            <View style={styles.progressInfo}>
+              <Text style={styles.progressText}>
+                {totalDurationMillis > 0 ? Math.round(Math.min((localWatchedMillis / totalDurationMillis) * 100, 100)) : 0}% Completed
+              </Text>
+              <Text style={styles.progressText}>
+                {Math.floor(localWatchedMillis / 1000)}s / {Math.floor(totalDurationMillis / 1000)}s
+              </Text>
+            </View>
+          </View>
+        </View>
+
         {/* Quality Selector - Matching Previous Design */}
         <View style={styles.qualityCard}>
           <View style={styles.qualityHeader}>
             <Ionicons name="settings-outline" size={18} color="#bb86fc" />
             <Text style={styles.qualityHeaderText}>VIDEO QUALITY</Text>
           </View>
-          
+
           <View style={styles.qualityContainer}>
             {["Auto", "240p", "360p", "720p"].map((q) => (
               <TouchableOpacity
@@ -343,7 +438,7 @@ const VideoPlayerScreen = () => {
                       </Text>
                     </View>
                   </View>
-                  
+
                   {active && (
                     <View style={styles.activeIndicator}>
                       <Ionicons name="radio-button-on" size={16} color="#bb86fc" />
@@ -370,7 +465,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingBottom: 30,
-    paddingTop:32,
+    paddingTop: 32,
   },
   center: {
     flex: 1,
@@ -680,5 +775,30 @@ const styles = StyleSheet.create({
   },
   activeIndicator: {
     marginLeft: 8,
+  },
+  progressContainer: {
+    marginTop: 8,
+  },
+  learningProgressBarBg: {
+    height: 8,
+    backgroundColor: '#0a0a0a',
+    borderRadius: 4,
+    overflow: 'hidden',
+    marginBottom: 8,
+  },
+  learningProgressBarFill: {
+    height: '100%',
+    backgroundColor: '#bb86fc',
+    borderRadius: 4,
+  },
+  progressInfo: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  progressText: {
+    color: '#888',
+    fontSize: 12,
+    fontWeight: '600',
   },
 });

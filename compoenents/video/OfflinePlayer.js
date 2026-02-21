@@ -1,14 +1,15 @@
 import React, { useRef, useEffect, useState } from "react";
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
-  TouchableOpacity, 
-  ActivityIndicator, 
-  Alert 
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ActivityIndicator,
+  Alert
 } from "react-native";
 import { useRoute, useNavigation } from "@react-navigation/native";
-import { useSelector } from "react-redux";
+import { useSelector, useDispatch } from "react-redux";
+import { updateVideoProgress } from "../redux/VideoProgressSlice";
 import { Video } from "expo-av";
 import { Ionicons } from "@expo/vector-icons";
 import * as FileSystem from "expo-file-system/legacy";
@@ -23,9 +24,32 @@ const OfflinePlayer = () => {
   const [decryptedUri, setDecryptedUri] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  const videoData = useSelector((state) => 
+  const videoData = useSelector((state) =>
     state.downloads.videos.find((v) => v.id === videoId)
   );
+  const savedProgress = useSelector(state => state.videoProgress.progressByVideo[videoId]);
+  const dispatch = useDispatch();
+
+  const lastPositionRef = useRef(0);
+  const watchedMillisRef = useRef(0);
+  const [localWatchedMillis, setLocalWatchedMillis] = useState(0);
+  const [totalDurationMillis, setTotalDurationMillis] = useState(0);
+  const [shouldResume, setShouldResume] = useState(true);
+
+  useEffect(() => {
+    if (savedProgress) {
+      watchedMillisRef.current = savedProgress.watchedSeconds * 1000;
+      setLocalWatchedMillis(savedProgress.watchedSeconds * 1000);
+      setTotalDurationMillis(savedProgress.totalDuration * 1000);
+      lastPositionRef.current = savedProgress.lastPosition;
+    } else {
+      watchedMillisRef.current = 0;
+      setLocalWatchedMillis(0);
+      setTotalDurationMillis(0);
+      lastPositionRef.current = 0;
+    }
+    setShouldResume(true);
+  }, [videoId]);
 
   useEffect(() => {
     let tempPath = null;
@@ -75,13 +99,44 @@ const OfflinePlayer = () => {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={28} color="#fff" />
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+          <Ionicons name="arrow-back" size={24} color="white" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>{videoData?.title}</Text>
+        <Text style={styles.headerTitleText} numberOfLines={1}>
+          {videoData?.title || "Offline Video"}
+        </Text>
       </View>
 
-      <View style={styles.videoWrapper}>
+      {/* Learning Progress Card */}
+      <View style={styles.progressCard}>
+        <View style={styles.sectionHeader}>
+          <Ionicons name="analytics-outline" size={18} color="#bb86fc" />
+          <Text style={styles.sectionTitle}>LEARNING PROGRESS</Text>
+        </View>
+
+        <View style={styles.progressContainer}>
+          <View style={styles.learningProgressBarBg}>
+            <View
+              style={[
+                styles.learningProgressBarFill,
+                {
+                  width: `${totalDurationMillis > 0 ? Math.min((localWatchedMillis / totalDurationMillis) * 100, 100) : 0}%`
+                }
+              ]}
+            />
+          </View>
+          <View style={styles.progressInfo}>
+            <Text style={styles.progressText}>
+              {totalDurationMillis > 0 ? Math.round(Math.min((localWatchedMillis / totalDurationMillis) * 100, 100)) : 0}% Completed
+            </Text>
+            <Text style={styles.progressText}>
+              {Math.floor(localWatchedMillis / 1000)}s / {Math.floor(totalDurationMillis / 1000)}s
+            </Text>
+          </View>
+        </View>
+      </View>
+
+      <View style={styles.videoContainer}>
         <Video
           ref={videoRef}
           source={{ uri: decryptedUri }}
@@ -89,6 +144,42 @@ const OfflinePlayer = () => {
           useNativeControls
           resizeMode="contain"
           shouldPlay
+          progressUpdateIntervalMillis={100}
+          onPlaybackStatusUpdate={(status) => {
+            if (status.isLoaded) {
+              if (status.durationMillis) {
+                setTotalDurationMillis(status.durationMillis);
+              }
+              if (status.isPlaying) {
+                const diff = status.positionMillis - lastPositionRef.current;
+                if (diff > 0 && diff < 1500) {
+                  watchedMillisRef.current += diff;
+                  setLocalWatchedMillis(watchedMillisRef.current);
+                }
+
+                const currentSeconds = Math.floor(watchedMillisRef.current / 1000);
+                const lastSavedSeconds = savedProgress?.watchedSeconds || 0;
+
+                if (currentSeconds > lastSavedSeconds + 3) {
+                  dispatch(updateVideoProgress({
+                    videoId,
+                    watchedSeconds: currentSeconds,
+                    totalDuration: Math.floor(status.durationMillis / 1000),
+                    lastPosition: status.positionMillis
+                  }));
+                }
+              }
+              lastPositionRef.current = status.positionMillis;
+            }
+          }}
+          onLoad={(status) => {
+            const targetPosition = lastPositionRef.current > 0 ? lastPositionRef.current : (savedProgress?.lastPosition || 0);
+            if (shouldResume && targetPosition > 0) {
+              videoRef.current?.setPositionAsync(targetPosition);
+            }
+            videoRef.current?.playAsync();
+            setShouldResume(false);
+          }}
         />
       </View>
 
@@ -99,7 +190,7 @@ const OfflinePlayer = () => {
         </View>
         <Text style={styles.title}>{videoData?.title}</Text>
         <Text style={styles.desc}>
-          This video is stored securely. The temporary playback file will be 
+          This video is stored securely. The temporary playback file will be
           automatically deleted when you exit this screen.
         </Text>
       </View>

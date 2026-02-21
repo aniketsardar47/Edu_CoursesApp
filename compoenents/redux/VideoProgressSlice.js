@@ -8,19 +8,30 @@ const videoProgressSlice = createSlice({
   name: "videoProgress",
   initialState,
   reducers: {
-    updateProgress: (state, action) => {
-      const { videoId, watchedSeconds, totalDuration, percentage, lastPosition } = action.payload;
+    updateVideoProgress: (state, action) => {
+      const { videoId, watchedSeconds, totalDuration, lastPosition } = action.payload;
+
+      const existingProgress = state.progressByVideo[videoId] || {
+        watchedSeconds: 0,
+        totalDuration: 0,
+        lastPosition: 0,
+        percentage: 0
+      };
+
+      const newWatchedSeconds = Math.max(existingProgress.watchedSeconds, watchedSeconds);
+      const newTotalDuration = totalDuration || existingProgress.totalDuration;
+      const percentage = newTotalDuration > 0 ? (newWatchedSeconds / newTotalDuration) * 100 : 0;
 
       state.progressByVideo[videoId] = {
-        watchedSeconds,
-        totalDuration,
-        percentage,
-        lastPosition,
+        watchedSeconds: newWatchedSeconds,
+        totalDuration: newTotalDuration,
+        percentage: Math.min(percentage, 100),
+        lastPosition: lastPosition,
         lastUpdated: Date.now()
       };
     }
   }
 });
 
-export const { updateProgress } = videoProgressSlice.actions;
+export const { updateVideoProgress } = videoProgressSlice.actions;
 export default videoProgressSlice.reducer;

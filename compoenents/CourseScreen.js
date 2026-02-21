@@ -11,6 +11,7 @@ import {
 } from "react-native";
 import { useRoute, useNavigation } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
+import { useSelector } from "react-redux";
 
 const CourseScreen = () => {
   const route = useRoute();
@@ -22,6 +23,8 @@ const CourseScreen = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  const videoProgress = useSelector(state => state.videoProgress.progressByVideo);
+
   useEffect(() => {
     if (!courseId) {
       setError("Invalid course ID");
@@ -30,11 +33,11 @@ const CourseScreen = () => {
     }
 
     Promise.all([
-      fetch(`http://10.107.25.116:7777/api/courses/${courseId}`).then(res => {
+      fetch(`http://10.197.15.102:7777/api/courses/${courseId}`).then(res => {
         if (!res.ok) throw new Error("Course not found");
         return res.json();
       }),
-      fetch(`http://10.107.25.116:7777/api/videos/course/${courseId}`).then(res => {
+      fetch(`http://10.197.15.102:7777/api/videos/course/${courseId}`).then(res => {
         if (!res.ok) throw new Error("Videos not found");
         return res.json();
       }),
@@ -83,10 +86,12 @@ const CourseScreen = () => {
 
   const renderVideo = ({ item, index }) => {
     const videoId = item._id || item.id;
+    const progress = videoProgress[videoId];
+    const isCompleted = progress && (progress.percentage >= 99 || progress.watchedSeconds >= progress.totalDuration);
 
     return (
       <TouchableOpacity
-        style={styles.videoCard}
+        style={[styles.videoCard, isCompleted && styles.completedVideoCard]}
         onPress={() =>
           navigation.navigate("VideoPlayerScreen", {
             courseId,
@@ -96,28 +101,36 @@ const CourseScreen = () => {
         activeOpacity={0.7}
       >
         <View style={styles.videoCardLeft}>
-          <View style={styles.videoIconContainer}>
-            <Ionicons name="play" size={24} color="#bb86fc" />
+          <View style={[styles.videoIconContainer, isCompleted && styles.completedIconContainer]}>
+            <Ionicons
+              name={isCompleted ? "checkmark-done-circle" : "play"}
+              size={24}
+              color={isCompleted ? "#4ade80" : "#bb86fc"}
+            />
           </View>
-          
+
           <View style={styles.videoInfo}>
-            <View style={styles.lessonBadge}>
-              <Text style={styles.lessonText}>Lesson {index + 1}</Text>
+            <View style={[styles.lessonBadge, isCompleted && styles.completedLessonBadge]}>
+              <Text style={[styles.lessonText, isCompleted && styles.completedLessonText]}>
+                {isCompleted ? "Completed" : `Lesson ${index + 1}`}
+              </Text>
             </View>
             <Text style={styles.videoTitle}>{item.title}</Text>
             <Text style={styles.videoDesc} numberOfLines={2}>
               {item.description || "No description available"}
             </Text>
-            
+
             <View style={styles.videoMetaRow}>
               <View style={styles.videoMetaItem}>
                 <Ionicons name="time-outline" size={12} color="#888" />
                 <Text style={styles.videoMetaText}>{item.duration || "10:30"}</Text>
               </View>
-              {item.quality && (
+              {progress && !isCompleted && (
                 <View style={styles.videoMetaItem}>
-                  <Ionicons name="settings-outline" size={12} color="#888" />
-                  <Text style={styles.videoMetaText}>{item.quality}</Text>
+                  <Ionicons name="stats-chart-outline" size={12} color="#bb86fc" />
+                  <Text style={[styles.videoMetaText, { color: '#bb86fc' }]}>
+                    {Math.round(progress.percentage)}% watched
+                  </Text>
                 </View>
               )}
             </View>
@@ -125,7 +138,11 @@ const CourseScreen = () => {
         </View>
 
         <View style={styles.playButton}>
-          <Ionicons name="play-circle" size={32} color="#bb86fc" />
+          <Ionicons
+            name={isCompleted ? "checkmark-circle" : "play-circle"}
+            size={32}
+            color={isCompleted ? "#4ade80" : "#bb86fc"}
+          />
         </View>
       </TouchableOpacity>
     );
@@ -133,13 +150,13 @@ const CourseScreen = () => {
 
   return (
     <View style={styles.container}>
-      <ScrollView 
+      <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
       >
         {/* Back Button */}
-        <TouchableOpacity 
-          onPress={() => navigation.goBack()} 
+        <TouchableOpacity
+          onPress={() => navigation.goBack()}
           style={styles.backRow}
           activeOpacity={0.7}
         >
@@ -169,12 +186,12 @@ const CourseScreen = () => {
                 <Ionicons name="videocam-outline" size={16} color="#bb86fc" />
                 <Text style={styles.metaText}>{videos.length} Videos</Text>
               </View>
-              
+
               <View style={styles.metaItem}>
                 <Ionicons name="time-outline" size={16} color="#bb86fc" />
                 <Text style={styles.metaText}>{course.duration || "Self-placed"}</Text>
               </View>
-              
+
               <View style={[styles.metaItem, styles.levelBadge]}>
                 <Ionicons name="trending-up-outline" size={16} color="#bb86fc" />
                 <Text style={styles.metaText}>{course.level || "Beginner"}</Text>
@@ -220,7 +237,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingBottom: 30,
-    paddingTop:32,
+    paddingTop: 32,
   },
   center: {
     flex: 1,
@@ -450,6 +467,19 @@ const styles = StyleSheet.create({
     color: "#888",
     fontSize: 14,
   },
+  completedVideoCard: {
+    borderColor: 'rgba(74, 222, 128, 0.3)',
+    backgroundColor: 'rgba(74, 222, 128, 0.05)',
+  },
+  completedIconContainer: {
+    backgroundColor: 'rgba(74, 222, 128, 0.1)',
+  },
+  completedLessonBadge: {
+    backgroundColor: 'rgba(74, 222, 128, 0.2)',
+  },
+  completedLessonText: {
+    color: '#4ade80',
+  }
 });
 
 export default CourseScreen;
