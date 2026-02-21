@@ -25,6 +25,7 @@ import { BlurView } from 'expo-blur';
 import { useDispatch } from "react-redux"; // ADD THIS
 import { addDownload } from "../redux/DownloadSlice";
 import { createDownloadResumable,encryptFile } from "../utils/DownloadManager";
+import { speakEnglishText, stopSpeech } from "../utils/TextToSpeech";
 
 const { width } = Dimensions.get("window");
 
@@ -255,6 +256,22 @@ const VideoPlayer = () => {
   }
 };
 
+
+const handleSpeakDescription = () => {
+  console.log("Speaking text:", descriptionText);
+
+  if (selectedLanguage !== "en") {
+    Alert.alert("Text to Speech available only in English");
+    return;
+  }
+
+  if (!descriptionText || descriptionText.trim().length === 0) {
+    Alert.alert("No text available to speak");
+    return;
+  }
+
+  speakEnglishText(descriptionText);
+};
 
   if (!videoData || !sourceUri) {
     return (
@@ -565,9 +582,24 @@ const VideoPlayer = () => {
             <View style={styles.modalContainer}>
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>Full Description</Text>
-                <TouchableOpacity onPress={() => setShowFullDesc(false)} style={styles.modalCloseBtn}>
-                  <Ionicons name="close" size={24} color="#fff" />
-                </TouchableOpacity>
+
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+                  {selectedLanguage === "en" && (
+                    <TouchableOpacity onPress={handleSpeakDescription}>
+                      <Ionicons name="volume-high-outline" size={22} color="#bb86fc" />
+                    </TouchableOpacity>
+                  )}
+
+                  <TouchableOpacity
+                    onPress={() => {
+                      stopSpeech();
+                      setShowFullDesc(false);
+                    }}
+                    style={styles.modalCloseBtn}
+                  >
+                    <Ionicons name="close" size={24} color="#fff" />
+                  </TouchableOpacity>
+                </View>
               </View>
               
               <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
@@ -1007,4 +1039,4 @@ languagePickerItem: {
 },
 });
 
-export default VideoPlayer;
+export default VideoPlayer; 
