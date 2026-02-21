@@ -21,6 +21,7 @@ import useRealtimeSpeed from "./useRealtimeSpeed";
 import * as Battery from "expo-battery"; 
 import { useDispatch } from "react-redux"; // ADD THIS
 import { addDownload } from "../redux/DownloadSlice";
+import { createDownloadResumable } from "../utils/DownloadManager";
 
 const { width } = Dimensions.get("window");
 
@@ -40,6 +41,9 @@ const VideoPlayer = () => {
   const [showFullDesc, setShowFullDesc] = useState(false);
   const [playbackPosition, setPlaybackPosition] = useState(0);
   const [shouldResume, setShouldResume] = useState(false);
+
+  const [downloadProgress, setDownloadProgress] = useState(0); // 0 to 1
+  const [isDownloading, setIsDownloading] = useState(false);
 
   const [batterySaverOn, setBatterySaverOn] = useState(false);
   
@@ -169,30 +173,43 @@ const VideoPlayer = () => {
   }
 
     const handleDownloadAction = async () => {
+    if (isDownloading) return;
+
     try {
-      // Use the high-quality URL for the actual download
-      const downloadUrl = videoData.url; 
-      const uri = await downloadVideo(downloadUrl, videoData.title);
+      setIsDownloading(true);
+      setDownloadProgress(0);
 
-      if (uri) {
-        setLocalUri(uri);
+      const downloadUrl = videoData.url;
+      const resumable = createDownloadResumable(
+        downloadUrl,
+        videoData.title,
+        (progress) => {
+          setDownloadProgress(progress);
+        }
+      );
 
-        // DISPATCH TO REDUX: Save the path and metadata
+      const result = await resumable.downloadAsync();
+
+      if (result && result.uri) {
+        setLocalUri(result.uri);
+
         dispatch(addDownload({
           id: videoId,
           courseId: courseId,
           title: videoData.title,
-          localUri: uri, // The internal Expo file path
+          localUri: result.uri,
           thumbnail: videoData.thumbnail || "https://via.placeholder.com/150",
           timestamp: new Date().toISOString(),
         }));
 
-        Alert.alert("Success", "Video stored in Redux & Local Storage");
-      } else {
-        Alert.alert("Error", "Download failed. Check permissions.");
+        Alert.alert("Success", "Video downloaded successfully!");
       }
     } catch (error) {
-      console.error("Redux Dispatch Error:", error);
+      console.error("Download Error:", error);
+      Alert.alert("Error", "Download failed. Please try again.");
+    } finally {
+      setIsDownloading(false);
+      setDownloadProgress(0);
     }
   };
 
@@ -237,19 +254,33 @@ const VideoPlayer = () => {
         {/* Action Buttons */}
         <View style={styles.actionRow}>
           <TouchableOpacity
-            style={styles.actionBtn}
+            style={[styles.actionBtn, isDownloading && styles.disabledBtn]}
             onPress={handleDownloadAction}
+            disabled={isDownloading}
           >
             <View style={[styles.actionContent, styles.downloadBtn]}>
-              <Ionicons name="download-outline" size={22} color="#fff" />
-              <Text style={styles.actionText}>Download</Text>
+              {isDownloading ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Ionicons name="download-outline" size={22} color="#fff" />
+              )}
+              <Text style={styles.actionText}>
+                {isDownloading ? `${Math.round(downloadProgress * 100)}%` : "Download"}
+              </Text>
             </View>
+            
+            {/* Progress Bar Background */}
+            {isDownloading && (
+              <View style={styles.progressBarContainer}>
+                <View style={[styles.progressBarFill, { width: `${downloadProgress * 100}%` }]} />
+              </View>
+            )}
           </TouchableOpacity>
 
           <TouchableOpacity
             style={[styles.actionBtn, !localUri && styles.disabledBtn]}
             onPress={shareVideo}
-            disabled={!localUri}
+            disabled={!localUri || isDownloading}
           >
             <View style={[styles.actionContent, !localUri ? styles.disabledShareBtn : styles.shareBtn]}>
               <Ionicons name="share-social-outline" size={22} color="#fff" />
@@ -799,6 +830,21 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     fontSize: 14,
     lineHeight: 22,
+  },
+  progressBarContainer: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 4,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+  },
+  progressBarFill: {
+    height: '100%',
+    backgroundColor: '#fff', // White bar on top of the purple button
+  },
+  disabledBtn: {
+    opacity: 0.8, // Less transparent so the progress is visible
   },
 });
 

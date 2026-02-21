@@ -28,3 +28,21 @@ export async function downloadVideo(url, filename) {
     return null;
   }
 }
+
+export const createDownloadResumable = (url, filename, progressCallback) => {
+  const safeName = filename.replace(/[^a-z0-9]/gi, "_").toLowerCase() + ".mp4";
+  const internalUri = FileSystem.documentDirectory + safeName;
+
+  return FileSystem.createDownloadResumable(
+    url,
+    internalUri,
+    {},
+    (downloadProgress) => {
+      const progress =
+        downloadProgress.totalBytesWritten /
+        downloadProgress.totalBytesExpectedToWrite;
+      // Pass the 0-1 decimal progress to the component
+      progressCallback(progress);
+    }
+  );
+};
