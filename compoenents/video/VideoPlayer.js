@@ -47,38 +47,53 @@ const VideoPlayer = () => {
   const [translating, setTranslating] = useState(false);
   const [loadingDescription, setLoadingDescription] = useState(false);
   const [showFullDesc, setShowFullDesc] = useState(false);
-  const [playbackPosition, setPlaybackPosition] = useState(0);
   const [shouldResume, setShouldResume] = useState(true); // Default to true to check for saved position
   const [isIdle, setIsIdle] = useState(false);
   const idleTimerRef = useRef(null);
+  const pauseTimerRef = useRef(null);
 
   // Ref to track last playback position for engagement calculation
   const lastPositionRef = useRef(0);
   // Ref to track total watched milliseconds in current session or overall
   const watchedMillisRef = useRef(0);
+  // Refs to track initialization state
+  const currentVideoIdRef = useRef(null);
+  const hasInitializedFromReduxRef = useRef(false);
   // Local state to drive UI progress dynamically with ms precision
   const [localWatchedMillis, setLocalWatchedMillis] = useState(0);
   const [totalDurationMillis, setTotalDurationMillis] = useState(0);
 
   const savedProgress = useSelector(state => state.videoProgress.progressByVideo[videoId]);
 
+
+
   // Set initial watched time from Redux if it exists
   useEffect(() => {
-    if (savedProgress) {
-      watchedMillisRef.current = savedProgress.watchedSeconds * 1000;
-      setLocalWatchedMillis(savedProgress.watchedSeconds * 1000);
-      setTotalDurationMillis(savedProgress.totalDuration * 1000);
-      lastPositionRef.current = savedProgress.lastPosition;
-      setPlaybackPosition(savedProgress.lastPosition); // Set initial local position
-    } else {
+    // If videoId changes, reset the tracking refs
+    if (currentVideoIdRef.current !== videoId) {
+      currentVideoIdRef.current = videoId;
+      hasInitializedFromReduxRef.current = false;
+
+      // Default reset for new video
       watchedMillisRef.current = 0;
       setLocalWatchedMillis(0);
       setTotalDurationMillis(0);
       lastPositionRef.current = 0;
-      setPlaybackPosition(0);
     }
-    setShouldResume(true); // Always allow resume when video changes
-  }, [videoId]);
+
+    // Try to initialize from Redux if we haven't already for this video
+    if (!hasInitializedFromReduxRef.current && savedProgress) {
+      console.log(`[VideoPlayer] Initializing from Redux for ${videoId}: ${savedProgress.watchedSeconds}s`);
+      watchedMillisRef.current = (savedProgress.watchedSeconds || 0) * 1000;
+      setLocalWatchedMillis((savedProgress.watchedSeconds || 0) * 1000);
+      setTotalDurationMillis((savedProgress.totalDuration || 0) * 1000);
+      lastPositionRef.current = savedProgress.lastPosition || 0;
+
+      hasInitializedFromReduxRef.current = true;
+    }
+
+    setShouldResume(true);
+  }, [videoId, savedProgress]);
 
   const [downloadProgress, setDownloadProgress] = useState(0); // 0 to 1
   const [isDownloading, setIsDownloading] = useState(false);
@@ -89,6 +104,36 @@ const VideoPlayer = () => {
   const speed = batterySaverOn ? 0 : rawSpeed;
 
 
+  useEffect(() => {
+    if (!videoData) return;
+
+    // Only auto-adjust when user selected Auto
+    if (quality !== "Auto") return;
+
+    let newQuality = "360p";
+
+    if (speed < 1) newQuality = "240p";
+    else if (speed < 3) newQuality = "360p";
+    else newQuality = "720p";
+
+    // Only update if actually different to avoid reload storm
+    if (newQuality !== quality) {
+      setQuality(newQuality);
+    }
+
+  }, [speed, videoData]);
+
+
+
+
+
+
+  // ================= VIDEO TRACKING CALCULATION =================
+  const watchedPercentage = totalDurationMillis > 0
+    ? ((localWatchedMillis / totalDurationMillis) * 100).toFixed(1)
+    : 0;
+
+  const isCompleted = Number(watchedPercentage) >= 99; // Using 99% for more reliable completion
 
   const resetIdleTimer = () => {
     // If it was blurred, remove blur and play
@@ -97,21 +142,28 @@ const VideoPlayer = () => {
       videoRef.current?.playAsync();
     }
 
-    // Clear existing timer
+    // Clear existing timers
     if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+    if (pauseTimerRef.current) clearTimeout(pauseTimerRef.current);
 
-    // Set new timer for 10 seconds
+    // Set new timer for 3 minutes (180,000ms) to trigger Blur
     idleTimerRef.current = setTimeout(() => {
       handleInactivity();
-    }, 10000);
+    }, 180000);
   };
 
   const handleInactivity = () => {
     setIsIdle(true);
-    // Pause video after the 3-second delay you requested
-    setTimeout(() => {
+    console.log("[VideoPlayer] Inactivity detected: Blur activated.");
+
+    // Clear any existing pause timer just in case
+    if (pauseTimerRef.current) clearTimeout(pauseTimerRef.current);
+
+    // Set a secondary timer for 2 minutes (120,000ms) to Pause the video
+    pauseTimerRef.current = setTimeout(() => {
+      console.log("[VideoPlayer] Continuous inactivity: Pausing video.");
       videoRef.current?.pauseAsync();
-    }, 30000);
+    }, 120000);
   };
 
   // Initialize timer on mount
@@ -119,6 +171,7 @@ const VideoPlayer = () => {
     resetIdleTimer();
     return () => {
       if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+      if (pauseTimerRef.current) clearTimeout(pauseTimerRef.current);
     };
   }, []);
 
@@ -148,10 +201,12 @@ const VideoPlayer = () => {
 
   useEffect(() => {
     if (!courseId || !videoId) return;
-    fetch(`http://10.197.15.102:7777/api/videos/course/${courseId}/${videoId}`)
+    const apiUrl = `http://10.197.15.102:7777/api/videos/course/${courseId}/${videoId}`;
+    console.log(`Fetching video data from: ${apiUrl}`);
+    fetch(apiUrl)
       .then((res) => res.json())
       .then(setVideoData)
-      .catch((err) => console.error("Fetch error:", err));
+      .catch((err) => console.error("Fetch video data error:", err));
   }, [courseId, videoId]);
 
   //   useEffect(() => {
@@ -174,6 +229,14 @@ const VideoPlayer = () => {
   //   fetchDescription();
   // }, [videoData?.descriptionUrl]);
 
+  // Helper to ensure URLs use the correct backend host (fixes local IP inconsistencies)
+  const normalizeUrl = (url) => {
+    if (!url) return url;
+    const currentBackendIP = "10.197.15.102:7777";
+    // Replace any local IP (10.x.x.x) with the current one used for API fetches
+    return url.replace(/10\.\d+\.\d+\.\d+:\d+/, currentBackendIP);
+  };
+
   useEffect(() => {
     const fetchInitialDescription = async () => {
       // Note: checking for english inside the new descriptionUrls object
@@ -182,7 +245,9 @@ const VideoPlayer = () => {
         if (videoData?.descriptionUrl) {
           try {
             setLoadingDescription(true);
-            const response = await fetch(videoData.descriptionUrl);
+            const targetUrl = normalizeUrl(videoData.descriptionUrl);
+            console.log(`Fetching legacy description from: ${targetUrl} (Original: ${videoData.descriptionUrl})`);
+            const response = await fetch(targetUrl);
             const text = await response.text();
             setDescriptionText(text);
             setOriginalText(text);
@@ -197,9 +262,13 @@ const VideoPlayer = () => {
 
       try {
         setLoadingDescription(true);
-        const response = await fetch(videoData.descriptionUrls.english);
-        const text = await response.text();
+        const targetUrl = normalizeUrl(videoData.descriptionUrls.english);
+        console.log(`Fetching description from: ${targetUrl} (Original: ${videoData.descriptionUrls.english})`);
 
+        const response = await fetch(targetUrl);
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+
+        const text = await response.text();
         setDescriptionText(text);
         setOriginalText(text); // Keep English as the reference
         setSelectedLanguage("en"); // Reset picker to English on video change
@@ -228,14 +297,20 @@ const VideoPlayer = () => {
 
   const currentUri = useMemo(() => {
     if (!videoData) return null;
+
     const res = videoData.resolutions || {};
+    let url = videoData.url;
+
     if (quality === "Auto") {
-      if (speed < 1) return res.p240 || videoData.url;
-      if (speed < 3) return res.p360 || videoData.url;
-      return res.p720 || videoData.url;
+      // Auto will use last decided quality, NOT speed directly
+      url = res.p360 || videoData.url;
+    } else {
+      url = res[quality] || videoData.url;
     }
-    return res[quality.replace("p", "p")] || videoData.url;
-  }, [quality, speed, videoData]);
+
+    return normalizeUrl(url);
+
+  }, [quality, videoData]); // 🚀 REMOVE speed
 
   const sourceUri = localUri || currentUri;
 
@@ -243,7 +318,7 @@ const VideoPlayer = () => {
     if (sourceUri) {
       setShouldResume(true);
     }
-  }, [sourceUri]);
+  }, [videoId]);
 
   const shareVideo = async () => {
     try {
@@ -351,7 +426,12 @@ const VideoPlayer = () => {
       setTranslating(true);
 
       // Fetch the text file directly from the URL (ImageKit)
-      const response = await fetch(targetUrl);
+      const normalizedTargetUrl = normalizeUrl(targetUrl);
+      console.log(`Fetching translation from: ${normalizedTargetUrl} (Original: ${targetUrl})`);
+
+      const response = await fetch(normalizedTargetUrl);
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+
       const text = await response.text();
 
       if (text) {
@@ -444,6 +524,7 @@ const VideoPlayer = () => {
       >
         {/* Video Player */}
         <View style={[styles.videoWrapper, batterySaverOn && styles.batterySaverVideo]}>
+
           <Video
             ref={videoRef}
             source={{ uri: sourceUri }}
@@ -451,69 +532,69 @@ const VideoPlayer = () => {
             useNativeControls
             resizeMode="contain"
             shouldPlay={isFocused}
-            progressUpdateIntervalMillis={100} // Smooth updates for UI
+            progressUpdateIntervalMillis={100}
+
             onPlaybackStatusUpdate={(status) => {
-              if (status.isLoaded) {
-                setPlaybackPosition(status.positionMillis);
-                if (status.durationMillis) {
-                  setTotalDurationMillis(status.durationMillis);
-                }
+              if (!status.isLoaded) return;
 
-                // --- Engagement Tracking Logic ---
-                if (status.isPlaying) {
-                  const diff = status.positionMillis - lastPositionRef.current;
+              if (status.durationMillis) {
+                setTotalDurationMillis(status.durationMillis);
+              }
 
-                  // If the difference is small and positive (e.g., between 0 and 1500ms), 
-                  // it's likely normal playback, so we count it as engagement.
-                  if (diff > 0 && diff < 1500) {
-                    watchedMillisRef.current += diff;
-                    setLocalWatchedMillis(watchedMillisRef.current);
-                  }
+              let diff = status.positionMillis - lastPositionRef.current;
 
-                  // Periodically update Redux (every 3 seconds of engagement)
-                  const currentSeconds = Math.floor(watchedMillisRef.current / 1000);
-                  const lastSavedSeconds = savedProgress?.watchedSeconds || 0;
-                  const totalDurationSeconds = Math.floor(status.durationMillis / 1000);
+              // Ignore backward seek
+              if (diff < 0) {
+                lastPositionRef.current = status.positionMillis;
+                return;
+              }
 
-                  if (currentSeconds > lastSavedSeconds + 3) {
-                    console.log(`Updating progress for ${videoId}: ${currentSeconds}s`);
-                    dispatch(updateVideoProgress({
-                      videoId,
-                      watchedSeconds: currentSeconds,
-                      totalDuration: totalDurationSeconds,
-                      lastPosition: status.positionMillis
-                    }));
-                  }
-                }
+              // Ignore large jumps (reload / manual seek)
+              if (diff > 3000) {
+                lastPositionRef.current = status.positionMillis;
+                return;
+              }
 
-                if (status.didJustFinish) {
-                  console.log(`Video finished: ${videoId}`);
-                  const durationSeconds = Math.floor(status.durationMillis / 1000);
+              if (status.isPlaying) {
+                watchedMillisRef.current += diff;
+                setLocalWatchedMillis(watchedMillisRef.current);
 
-                  // Force 100% watched on finish
-                  watchedMillisRef.current = status.durationMillis;
-                  setLocalWatchedMillis(status.durationMillis);
+                const currentSeconds = Math.floor(watchedMillisRef.current / 1000);
+                const durationSeconds = Math.floor(status.durationMillis / 1000);
+                const lastSavedSeconds = savedProgress?.watchedSeconds || 0;
 
+                if (currentSeconds > lastSavedSeconds + 3) {
                   dispatch(updateVideoProgress({
                     videoId,
-                    watchedSeconds: durationSeconds,
+                    watchedSeconds: currentSeconds,
                     totalDuration: durationSeconds,
-                    lastPosition: status.durationMillis
+                    lastPosition: status.positionMillis
                   }));
                 }
-                lastPositionRef.current = status.positionMillis;
               }
+
+              if (status.didJustFinish) {
+                const durationSeconds = Math.floor(status.durationMillis / 1000);
+
+                watchedMillisRef.current = status.durationMillis;
+                setLocalWatchedMillis(status.durationMillis);
+
+                dispatch(updateVideoProgress({
+                  videoId,
+                  watchedSeconds: durationSeconds,
+                  totalDuration: durationSeconds,
+                  lastPosition: status.durationMillis
+                }));
+              }
+
+              lastPositionRef.current = status.positionMillis;
             }}
-            onLoad={(status) => {
-              console.log(`Video loaded. shouldResume: ${shouldResume}, local: ${playbackPosition}, saved: ${savedProgress?.lastPosition}`);
 
-              // Priority 1: If it's a reload (shouldResume is true but we already have a session playbackPosition)
-              // Priority 2: If it's the initial load for this video (shouldResume is true, using saved position)
+            onLoad={() => {
+              const targetPos = savedProgress?.lastPosition || 0;
 
-              const targetPosition = playbackPosition > 0 ? playbackPosition : (savedProgress?.lastPosition || 0);
-
-              if (shouldResume && targetPosition > 0) {
-                videoRef.current?.setPositionAsync(targetPosition);
+              if (shouldResume && targetPos > 0) {
+                videoRef.current?.setPositionAsync(targetPos);
               }
 
               if (isFocused) {
@@ -523,6 +604,15 @@ const VideoPlayer = () => {
               setShouldResume(false);
             }}
           />
+
+
+
+
+
+
+
+
+
           {isIdle && (
             <BlurView intensity={80} tint="dark" style={StyleSheet.absoluteFill}>
               <View style={styles.idleOverlay}>
@@ -535,8 +625,25 @@ const VideoPlayer = () => {
 
         {/* Title Section */}
         <View style={styles.titleSection}>
-          <View style={styles.titleAccent} />
-          <Text style={styles.videoTitle}>{videoData.title || "Video Lesson"}</Text>
+          <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
+            <View style={styles.titleAccent} />
+            <Text style={styles.videoTitle}>{videoData.title || "Video Lesson"}</Text>
+          </View>
+
+          <View style={styles.trackingContainer}>
+            <Text style={[
+              styles.trackingText,
+              { color: isCompleted ? "#4ade80" : "#bb86fc" }
+            ]}>
+              {watchedPercentage}%
+            </Text>
+            <Text style={[
+              styles.incompleteText,
+              isCompleted && { color: '#4ade80' }
+            ]}>
+              {isCompleted ? "Completed" : "In Progress"}
+            </Text>
+          </View>
         </View>
 
         {/* Learning Progress Card */}
@@ -552,14 +659,14 @@ const VideoPlayer = () => {
                 style={[
                   styles.learningProgressBarFill,
                   {
-                    width: `${totalDurationMillis > 0 ? Math.min((localWatchedMillis / totalDurationMillis) * 100, 100) : 0}%`
+                    width: `${watchedPercentage}%`
                   }
                 ]}
               />
             </View>
             <View style={styles.progressInfo}>
               <Text style={styles.progressText}>
-                {totalDurationMillis > 0 ? Math.round(Math.min((localWatchedMillis / totalDurationMillis) * 100, 100)) : 0}% Completed
+                {Math.round(watchedPercentage)}% Completed
               </Text>
               <Text style={styles.progressText}>
                 {Math.floor(localWatchedMillis / 1000)}s / {Math.floor(totalDurationMillis / 1000)}s
@@ -567,7 +674,7 @@ const VideoPlayer = () => {
             </View>
           </View>
 
-          {totalDurationMillis > 0 && localWatchedMillis >= totalDurationMillis && (
+          {isCompleted && (
             <View style={styles.completedBadge}>
               <Ionicons name="checkmark-circle" size={16} color="#4ade80" />
               <Text style={styles.completedText}>Lesson Completed</Text>
@@ -613,7 +720,7 @@ const VideoPlayer = () => {
           </TouchableOpacity>
         </View>
 
-        {/* Quality Selector */}
+        {/* Video Quality Selector */}
         <View style={styles.sectionCard}>
           <View style={styles.sectionHeader}>
             <Ionicons name="settings-outline" size={18} color="#bb86fc" />
@@ -624,20 +731,17 @@ const VideoPlayer = () => {
             {["Auto", "240p", "360p", "720p"].map((q) => (
               <TouchableOpacity
                 key={q}
-                disabled={batterySaverOn}
                 style={[
                   styles.qualityOption,
                   quality === q && styles.activeQuality,
                   batterySaverOn && styles.disabledQuality,
                 ]}
-                onPress={() => {
-                  setShouldResume(true);
-                  setQuality(q);
-                }}
+                onPress={() => setQuality(q)}
+                disabled={batterySaverOn}
               >
                 {quality === q && (
                   <View style={styles.qualityIndicator}>
-                    <Ionicons name="checkmark" size={14} color="#fff" />
+                    <Ionicons name="checkmark" size={10} color="#fff" />
                   </View>
                 )}
                 <Text style={[
@@ -650,48 +754,46 @@ const VideoPlayer = () => {
             ))}
           </View>
 
-          {!batterySaverOn && (
-            <View style={styles.speedContainer}>
-              <View style={styles.speedIconContainer}>
-                <Ionicons name="speedometer-outline" size={20} color="#bb86fc" />
-              </View>
-              <View style={styles.speedInfo}>
-                <Text style={styles.speedLabel}>Network Speed</Text>
-                {/* Multiply Mbps by 1000 to get kbps */}
-                <Text style={styles.speedValue}>
-                  {Math.round(speed * 100)} kbps
-                </Text>
-              </View>
+          {/* Speed Information */}
+          <View style={styles.speedContainer}>
+            <View style={styles.speedIconContainer}>
+              <Ionicons name="speedometer-outline" size={20} color="#bb86fc" />
             </View>
-          )}
+            <View style={styles.speedInfo}>
+              <Text style={styles.speedLabel}>Network Speed</Text>
+              <Text style={styles.speedValue}>{Math.round(speed * 100)} kbps</Text>
+            </View>
+          </View>
         </View>
 
-        {/* Description Card */}
+        {/* Description and Translation Section */}
         <View style={styles.sectionCard}>
           <View style={styles.sectionHeader}>
-            <Ionicons name="document-text-outline" size={18} color="#bb86fc" />
-            <Text style={styles.sectionTitle}>DESCRIPTION</Text>
+            <Ionicons name="language-outline" size={18} color="#bb86fc" />
+            <Text style={styles.sectionTitle}>DESCRIPTION & TRANSLATION</Text>
           </View>
 
-          {/* NEW: Styled Language Display Card */}
-          <View style={styles.languageDisplayCard}>
+          {/* Simplified Language Picker as a Display Card */}
+          <TouchableOpacity
+            style={styles.languageDisplayCard}
+            onPress={() => { }} // Logic handled by Picker below if needed
+          >
             <Text style={styles.selectedLanguageText}>
-              {selectedLanguage === 'en' ? 'English' :
-                selectedLanguage === 'hi' ? 'Hindi' :
-                  selectedLanguage === 'mr' ? 'Marathi' :
-                    selectedLanguage === 'te' ? 'Telugu' : 'Tamil'}
+              {selectedLanguage === "en" ? "English" :
+                selectedLanguage === "hi" ? "Hindi" :
+                  selectedLanguage === "mr" ? "Marathi" :
+                    selectedLanguage === "te" ? "Telugu" : "Tamil"}
             </Text>
 
-            {/* Hidden Picker that triggers on tap of the arrow */}
             <View style={styles.pickerOverlayContainer}>
               <Picker
                 selectedValue={selectedLanguage}
-                dropdownIconColor="#bb86fc"
-                style={styles.hiddenPicker}
                 onValueChange={(itemValue) => {
                   setSelectedLanguage(itemValue);
                   translateDescription(itemValue);
                 }}
+                dropdownIconColor="#bb86fc"
+                style={styles.hiddenPicker}
               >
                 <Picker.Item label="English" value="en" />
                 <Picker.Item label="Hindi" value="hi" />
@@ -700,7 +802,7 @@ const VideoPlayer = () => {
                 <Picker.Item label="Tamil" value="ta" />
               </Picker>
             </View>
-          </View>
+          </TouchableOpacity>
 
           <View style={styles.descriptionContainer}>
             {loadingDescription || translating ? (
@@ -823,16 +925,14 @@ const VideoPlayer = () => {
         </Modal>
 
       </ScrollView>
-      {
-        isIdle && (
-          <BlurView
-            intensity={60}
-            tint="dark"
-            style={[StyleSheet.absoluteFill, { zIndex: 999 }]}
-          />
-        )
-      }
-    </View >
+      {isIdle && (
+        <BlurView
+          intensity={60}
+          tint="dark"
+          style={[StyleSheet.absoluteFill, { zIndex: 999 }]}
+        />
+      )}
+    </View>
   );
 };
 

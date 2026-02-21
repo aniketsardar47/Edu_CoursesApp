@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, useMemo } from "react";
 import {
   View,
   Text,
@@ -43,22 +43,37 @@ const VideoPlayerScreen = () => {
   const [totalDurationMillis, setTotalDurationMillis] = useState(0);
   const [shouldResume, setShouldResume] = useState(true);
 
+  // Refs to track initialization state
+  const currentVideoIdRef = useRef(null);
+  const hasInitializedFromReduxRef = useRef(false);
+
   useEffect(() => {
-    if (savedProgress) {
-      watchedMillisRef.current = (savedProgress.watchedSeconds || 0) * 1000;
-      setLocalWatchedMillis((savedProgress.watchedSeconds || 0) * 1000);
-      setTotalDurationMillis((savedProgress.totalDuration || 0) * 1000);
-      lastPositionRef.current = savedProgress.lastPosition || 0;
-      setLastPosition(savedProgress.lastPosition || 0);
-    } else {
+    // If videoId changes, reset the tracking refs
+    if (currentVideoIdRef.current !== videoId) {
+      currentVideoIdRef.current = videoId;
+      hasInitializedFromReduxRef.current = false;
+
+      // Default reset for new video
       watchedMillisRef.current = 0;
       setLocalWatchedMillis(0);
       setTotalDurationMillis(0);
       lastPositionRef.current = 0;
       setLastPosition(0);
     }
+
+    // Try to initialize from Redux if we haven't already for this video
+    if (!hasInitializedFromReduxRef.current && savedProgress) {
+      console.log(`[VideoPlayerScreen] Initializing from Redux for ${videoId}: ${savedProgress.watchedSeconds}s`);
+      watchedMillisRef.current = (savedProgress.watchedSeconds || 0) * 1000;
+      setLocalWatchedMillis((savedProgress.watchedSeconds || 0) * 1000);
+      setTotalDurationMillis((savedProgress.totalDuration || 0) * 1000);
+      lastPositionRef.current = savedProgress.lastPosition || 0;
+      setLastPosition(savedProgress.lastPosition || 0);
+      hasInitializedFromReduxRef.current = true;
+    }
+
     setShouldResume(true);
-  }, [videoId]);
+  }, [videoId, savedProgress]);
 
   /* ================= BATTERY ================= */
   useEffect(() => {
@@ -157,9 +172,32 @@ const VideoPlayerScreen = () => {
     return () => clearInterval(interval);
   }, [batterySaverOn]);
 
+  // Helper to ensure URLs use the correct backend host (fixes local IP inconsistencies)
+  const normalizeUrl = (url) => {
+    if (!url) return url;
+    const currentBackendIP = "10.197.15.102:7777";
+    return url.replace(/10\.\d+\.\d+\.\d+:\d+/, currentBackendIP);
+  };
+
+  const currentVideoUrl = useMemo(() => {
+    if (!videoData) return null;
+    const sources = {
+      Auto: videoData.url,
+      "240p": videoData.resolutions?.p240,
+      "360p": videoData.resolutions?.p360,
+      "720p": videoData.resolutions?.p720,
+    };
+    const rawUrl = sources[quality] || videoData.url;
+    const normalized = normalizeUrl(rawUrl);
+    console.log(`[VideoPlayerScreen] Source URI: ${normalized} (Quality: ${quality})`);
+    return normalized;
+  }, [quality, videoData]);
+
   /* ================= RESUME POSITION ================= */
   useEffect(() => {
-    setShouldResume(true);
+    if (currentVideoUrl) {
+      setShouldResume(true);
+    }
   }, [currentVideoUrl]);
 
   const onReadyForDisplay = () => {
@@ -192,15 +230,6 @@ const VideoPlayerScreen = () => {
       </View>
     );
   }
-
-  const VIDEO_SOURCES = {
-    Auto: videoData.url,
-    "240p": videoData.resolutions?.p240,
-    "360p": videoData.resolutions?.p360,
-    "720p": videoData.resolutions?.p720,
-  };
-
-  const currentVideoUrl = VIDEO_SOURCES[quality] || videoData.url;
 
   // ================= VIDEO TRACKING CALCULATION =================
   const watchedPercentage = totalDurationMillis > 0
@@ -298,14 +327,16 @@ const VideoPlayerScreen = () => {
               progressUpdateIntervalMillis={100}
               onPlaybackStatusUpdate={(status) => {
                 if (status.isLoaded) {
+                  // Update local state for UI position instantly
                   setLastPosition(status.positionMillis);
+
                   if (status.durationMillis) {
                     setTotalDurationMillis(status.durationMillis);
                   }
 
                   if (status.isPlaying) {
                     const diff = status.positionMillis - lastPositionRef.current;
-                    if (diff > 0 && diff < 1500) {
+                    if (diff > 0 && diff < 2000) {
                       watchedMillisRef.current += diff;
                       setLocalWatchedMillis(watchedMillisRef.current);
                     }
@@ -314,7 +345,9 @@ const VideoPlayerScreen = () => {
                     const lastSavedSeconds = savedProgress?.watchedSeconds || 0;
                     const durationSeconds = Math.floor(status.durationMillis / 1000);
 
+                    // Sync every 3 seconds for higher precision
                     if (currentSeconds > lastSavedSeconds + 3) {
+                      console.log(`[VideoPlayerScreen] Syncing Redux: ${currentSeconds}s / ${durationSeconds}s`);
                       dispatch(updateVideoProgress({
                         videoId,
                         watchedSeconds: currentSeconds,
@@ -326,14 +359,21 @@ const VideoPlayerScreen = () => {
 
                   if (status.didJustFinish) {
                     const durationSeconds = Math.floor(status.durationMillis / 1000);
-                    watchedMillisRef.current = status.durationMillis;
-                    setLocalWatchedMillis(status.durationMillis);
-                    dispatch(updateVideoProgress({
-                      videoId,
-                      watchedSeconds: durationSeconds,
-                      totalDuration: durationSeconds,
-                      lastPosition: status.durationMillis
-                    }));
+                    const currentWaitPercentage = (watchedMillisRef.current / status.durationMillis) * 100;
+
+                    console.log(`[VideoPlayerScreen] didJustFinish. Progress: ${currentWaitPercentage.toFixed(1)}%`);
+
+                    // Safeguard: Only 100% if > 90% watched
+                    if (currentWaitPercentage > 90) {
+                      watchedMillisRef.current = status.durationMillis;
+                      setLocalWatchedMillis(status.durationMillis);
+                      dispatch(updateVideoProgress({
+                        videoId,
+                        watchedSeconds: durationSeconds,
+                        totalDuration: durationSeconds,
+                        lastPosition: status.durationMillis
+                      }));
+                    }
                   }
                   lastPositionRef.current = status.positionMillis;
                 }
