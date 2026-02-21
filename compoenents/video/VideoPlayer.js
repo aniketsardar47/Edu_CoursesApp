@@ -125,25 +125,49 @@ const VideoPlayer = () => {
       .catch((err) => console.error("Fetch error:", err));
   }, [courseId, videoId]);
 
+//   useEffect(() => {
+//   const fetchDescription = async () => {
+//     if (!videoData?.descriptionUrl) return;
+//     try {
+//       setLoadingDescription(true);
+//       const response = await fetch(videoData.descriptionUrl);
+//       const text = await response.text();
+
+//       setDescriptionText(text);
+//       setOriginalText(text); // IMPORTANT: store original text
+
+//     } catch {
+//       setDescriptionText("Description not available.");
+//     } finally {
+//       setLoadingDescription(false);
+//     }
+//   };
+//   fetchDescription();
+// }, [videoData?.descriptionUrl]);
+
   useEffect(() => {
-  const fetchDescription = async () => {
-    if (!videoData?.descriptionUrl) return;
+  const fetchInitialDescription = async () => {
+    // Note: Checking for english inside the new descriptionUrls object
+    if (!videoData?.descriptionUrls?.english) return;
+    
     try {
       setLoadingDescription(true);
-      const response = await fetch(videoData.descriptionUrl);
+      const response = await fetch(videoData.descriptionUrls.english);
       const text = await response.text();
 
       setDescriptionText(text);
-      setOriginalText(text); // IMPORTANT: store original text
-
-    } catch {
+      setOriginalText(text); // Keep English as the reference
+      setSelectedLanguage("en"); // Reset picker to English on video change
+    } catch (error) {
+      console.error("Error fetching description:", error);
       setDescriptionText("Description not available.");
     } finally {
       setLoadingDescription(false);
     }
   };
-  fetchDescription();
-}, [videoData?.descriptionUrl]);
+
+  fetchInitialDescription();
+}, [videoData?.descriptionUrls?.english]);
 
   const renderFormattedText = (text) => {
     if (!text) return null;
@@ -207,50 +231,91 @@ const VideoPlayer = () => {
     supported ? Linking.openURL(url) : Alert.alert("Cannot open file");
   };
 
-  const translateDescription = async (targetLang) => {
-  if (!originalText) return;
+//   const translateDescription = async (targetLang) => {
+//   if (!originalText) return;
 
+//   const languageMap = {
+//     en: "English",
+//     hi: "Hindi",
+//     mr: "Marathi",
+//     te: "Telugu",
+//     ta: "Tamil",
+//   };
+
+//   // If English → restore original
+//   if (targetLang === "en") {
+//     setDescriptionText(originalText);
+//     return;
+//   }
+
+//   try {
+//     setTranslating(true);
+
+//     const response = await fetch(
+//       "http://10.107.25.116:7777/api/translate/translate",
+//       {
+//         method: "POST",
+//         headers: {
+//           "Content-Type": "application/json",
+//         },
+//         body: JSON.stringify({
+//           text: originalText,
+//           target: languageMap[targetLang],
+//         }),
+//       }
+//     );
+
+//     const data = await response.json();
+
+//     if (data.translatedText) {
+//       setDescriptionText(data.translatedText);
+//     } else {
+//       Alert.alert("Translation failed");
+//     }
+//   } catch (error) {
+//     console.log("Translation Error:", error);
+//     Alert.alert("Translation Failed");
+//   } finally {
+//     setTranslating(false);
+//   }
+// };
+
+
+const translateDescription = async (targetLang) => {
+  if (!videoData?.descriptionUrls) return;
+
+  // Map the picker values (en, hi, etc.) to your JSON keys (english, hindi, etc.)
   const languageMap = {
-    en: "English",
-    hi: "Hindi",
-    mr: "Marathi",
-    te: "Telugu",
-    ta: "Tamil",
+    en: "english",
+    hi: "hindi",
+    mr: "marathi",
+    te: "telugu",
+    ta: "tamil",
   };
 
-  // If English → restore original
-  if (targetLang === "en") {
-    setDescriptionText(originalText);
+  const targetKey = languageMap[targetLang];
+  const targetUrl = videoData.descriptionUrls[targetKey];
+
+  if (!targetUrl) {
+    Alert.alert("Error", "Translation file not found for this language.");
     return;
   }
 
   try {
     setTranslating(true);
+    
+    // Fetch the text file directly from the URL (ImageKit)
+    const response = await fetch(targetUrl);
+    const text = await response.text();
 
-    const response = await fetch(
-      "http://10.107.25.116:7777/api/translate/translate",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          text: originalText,
-          target: languageMap[targetLang],
-        }),
-      }
-    );
-
-    const data = await response.json();
-
-    if (data.translatedText) {
-      setDescriptionText(data.translatedText);
+    if (text) {
+      setDescriptionText(text);
     } else {
-      Alert.alert("Translation failed");
+      Alert.alert("Error", "Translation file is empty.");
     }
   } catch (error) {
-    console.log("Translation Error:", error);
-    Alert.alert("Translation Failed");
+    console.error("Fetch Error:", error);
+    Alert.alert("Failed", "Could not load the translated description.");
   } finally {
     setTranslating(false);
   }
@@ -461,52 +526,59 @@ const handleSpeakDescription = () => {
         </View>
 
         {/* Description Card */}
-        <View style={styles.sectionCard}>
-          <View style={styles.sectionHeader}>
-            <Ionicons name="document-text-outline" size={18} color="#bb86fc" />
-            <Text style={styles.sectionTitle}>DESCRIPTION</Text>
-          </View>
-          
-          {/* Language Selector */}
-{/* Language Selector */}
-<View style={styles.languagePickerWrapper}>
-  <Picker
-    selectedValue={selectedLanguage}
-    dropdownIconColor="#bb86fc"
-    mode="dropdown"
-    style={styles.languagePicker}
-    itemStyle={styles.languagePickerItem} // iOS fix
-    onValueChange={(itemValue) => {
-      setSelectedLanguage(itemValue);
-      translateDescription(itemValue);
-    }}
-  >
-    <Picker.Item label="English" value="en" />
-    <Picker.Item label="Hindi" value="hi" />
-    <Picker.Item label="Marathi" value="mr" />
-    <Picker.Item label="Telugu" value="te" />
-    <Picker.Item label="Tamil" value="ta" />
-  </Picker>
-</View>
+<View style={styles.sectionCard}>
+  <View style={styles.sectionHeader}>
+    <Ionicons name="document-text-outline" size={18} color="#bb86fc" />
+    <Text style={styles.sectionTitle}>DESCRIPTION</Text>
+  </View>
+  
+  {/* NEW: Styled Language Display Card */}
+  <View style={styles.languageDisplayCard}>
+    <Text style={styles.selectedLanguageText}>
+      {selectedLanguage === 'en' ? 'English' : 
+       selectedLanguage === 'hi' ? 'Hindi' : 
+       selectedLanguage === 'mr' ? 'Marathi' : 
+       selectedLanguage === 'te' ? 'Telugu' : 'Tamil'}
+    </Text>
+    
+    {/* Hidden Picker that triggers on tap of the arrow */}
+    <View style={styles.pickerOverlayContainer}>
+      <Picker
+        selectedValue={selectedLanguage}
+        dropdownIconColor="#bb86fc"
+        style={styles.hiddenPicker}
+        onValueChange={(itemValue) => {
+          setSelectedLanguage(itemValue);
+          translateDescription(itemValue);
+        }}
+      >
+        <Picker.Item label="English" value="en" />
+        <Picker.Item label="Hindi" value="hi" />
+        <Picker.Item label="Marathi" value="mr" />
+        <Picker.Item label="Telugu" value="te" />
+        <Picker.Item label="Tamil" value="ta" />
+      </Picker>
+    </View>
+  </View>
 
-          <View style={styles.descriptionContainer}>
-            {loadingDescription || translating ? (
-              <ActivityIndicator size="small" color="#bb86fc" />
-            ) : (
-              <>
-                <Text numberOfLines={5} style={styles.descriptionText}>
-                  {descriptionText}
-                </Text>
-                {descriptionText.length > 200 && (
-                  <TouchableOpacity onPress={() => setShowFullDesc(true)} style={styles.readMoreBtn}>
-                    <Text style={styles.readMoreText}>Read More</Text>
-                    <Ionicons name="arrow-forward" size={16} color="#bb86fc" />
-                  </TouchableOpacity>
-                )}
-              </>
-            )}
-          </View>
-        </View>
+  <View style={styles.descriptionContainer}>
+    {loadingDescription || translating ? (
+      <ActivityIndicator size="small" color="#bb86fc" />
+    ) : (
+      <>
+        <Text numberOfLines={5} style={styles.descriptionText}>
+          {descriptionText}
+        </Text>
+        {descriptionText.length > 200 && (
+          <TouchableOpacity onPress={() => setShowFullDesc(true)} style={styles.readMoreBtn}>
+            <Text style={styles.readMoreText}>Read More</Text>
+            <Ionicons name="arrow-forward" size={16} color="#bb86fc" />
+          </TouchableOpacity>
+        )}
+      </>
+    )}
+  </View>
+</View>
 
         {/* Attachments Section */}
         {Array.isArray(videoData.attachments) && videoData.attachments.length > 0 && (
@@ -1036,6 +1108,44 @@ languagePicker: {
 
 languagePickerItem: {
   color: "#ffffff",
+},
+languageDisplayCard: {
+  backgroundColor: "#0a0a0a",
+  borderRadius: 15,
+  borderWidth: 1,
+  borderColor: "#2a2a2a",
+  paddingHorizontal: 16,
+  paddingVertical: 18,
+  flexDirection: 'row',
+  justifyContent: 'space-between',
+  alignItems: 'center',
+  marginBottom: 16,
+  position: 'relative',
+},
+selectedLanguageText: {
+  color: "#ffffff",
+  fontSize: 16, // Matches the large text in your image
+  fontWeight: "400",
+},
+pickerOverlayContainer: {
+  position: 'absolute',
+  right: 10,
+  top: 0,
+  bottom: 0,
+  width: 50, // Only covers the arrow area
+  justifyContent: 'center',
+},
+hiddenPicker: {
+  width: '100%',
+  color: 'transparent', // Keeps only the arrow visible on Android
+  opacity: 1,
+},
+// Ensure descriptionContainer is updated for better spacing
+descriptionContainer: {
+  backgroundColor: '#0a0a0a',
+  borderRadius: 12,
+  padding: 15,
+  minHeight: 100, // Provides a clean empty state like your image
 },
 });
 

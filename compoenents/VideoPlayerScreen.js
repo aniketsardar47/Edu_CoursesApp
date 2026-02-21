@@ -33,6 +33,10 @@ const VideoPlayerScreen = () => {
   const [batteryLevel, setBatteryLevel] = useState(null);
   const [batterySaverOn, setBatterySaverOn] = useState(false);
 
+  const [watchedSeconds, setWatchedSeconds] = useState(new Set());
+  const [previousSecond, setPreviousSecond] = useState(null);
+  const [videoDuration, setVideoDuration] = useState(0);
+
   /* ================= BATTERY ================= */
   useEffect(() => {
   Battery.getBatteryLevelAsync().then((level) => {
@@ -171,6 +175,16 @@ const VideoPlayerScreen = () => {
 
   const currentVideoUrl = VIDEO_SOURCES[quality] || videoData.url;
 
+  // ================= VIDEO TRACKING CALCULATION =================
+
+const watchedCount = watchedSeconds.size;
+
+const watchedPercentage = videoDuration
+  ? ((watchedCount / videoDuration) * 100).toFixed(1)
+  : 0;
+
+const isCompleted = Number(watchedPercentage) >= 75;
+
   return (
     <View style={styles.container}>
       <ScrollView 
@@ -191,31 +205,54 @@ const VideoPlayerScreen = () => {
         {/* Title Section with Purple Accent */}
         <View style={styles.titleSection}>
           <View style={styles.titleAccent} />
-          <View style={styles.titleContent}>
-            <Text style={styles.title}>{videoData.title}</Text>
-            
-            {/* Battery and Speed Info in Row */}
-            <View style={styles.infoRow}>
-              {batteryLevel !== null && (
-                <View style={styles.infoChip}>
-                  <Ionicons 
-                    name={batterySaverOn ? "battery-dead" : "battery-full"} 
-                    size={14} 
-                    color={batterySaverOn ? "#bb86fc" : "#4ade80"} 
-                  />
-                  <Text style={[styles.infoChipText, batterySaverOn && styles.batteryWarning]}>
-                    {batteryLevel}% {batterySaverOn ? "(Saver)" : ""}
-                  </Text>
-                </View>
-              )}
+          <View style={[styles.titleContent, { 
+            flexDirection: 'row', 
+            justifyContent: 'space-between', 
+            alignItems: 'center' 
+          }]}>
+     <View style={{ flex: 1 }}>
+  <Text style={styles.title}>{videoData.title}</Text>
 
-              {networkSpeed && (
-                <View style={styles.infoChip}>
-                  <Ionicons name="speedometer" size={14} color="#bb86fc" />
-                  <Text style={styles.infoChipText}>{networkSpeed}</Text>
-                </View>
-              )}
-            </View>
+  <View style={styles.infoRow}>
+    {batteryLevel !== null && (
+      <View style={styles.infoChip}>
+        <Ionicons 
+          name={batterySaverOn ? "battery-dead" : "battery-full"} 
+          size={14} 
+          color={batterySaverOn ? "#bb86fc" : "#4ade80"} 
+        />
+        <Text style={[
+          styles.infoChipText, 
+          batterySaverOn && styles.batteryWarning
+        ]}>
+          {batteryLevel}% {batterySaverOn ? "(Saver)" : ""}
+        </Text>
+      </View>
+    )}
+
+    {networkSpeed && (
+      <View style={styles.infoChip}>
+        <Ionicons name="speedometer" size={14} color="#bb86fc" />
+        <Text style={styles.infoChipText}>{networkSpeed}</Text>
+      </View>
+    )}
+  </View>
+</View>
+
+<View style={styles.trackingContainer}>
+  <Text style={[
+    styles.trackingText,
+    { color: isCompleted ? "#4ade80" : "#f87171" }
+  ]}>
+    {watchedPercentage}%
+  </Text>
+
+  {!isCompleted && (
+    <Text style={styles.incompleteText}>
+      Incomplete
+    </Text>
+  )}
+</View>
           </View>
         </View>
 
@@ -229,11 +266,44 @@ const VideoPlayerScreen = () => {
               resizeMode={ResizeMode.CONTAIN}
               shouldPlay={isFocused}
               style={styles.video}
-              onPlaybackStatusUpdate={(status) => {
-                if (status.isLoaded) {
-                  setLastPosition(status.positionMillis);
-                }
-              }}
+
+
+
+            onPlaybackStatusUpdate={(status) => {
+  if (!status.isLoaded) return;
+
+  const currentSecond = Math.floor(status.positionMillis / 1000);
+  const durationSec = Math.floor(status.durationMillis / 1000);
+
+  // Set duration once
+  if (videoDuration === 0 && durationSec) {
+    setVideoDuration(durationSec);
+  }
+
+  if (previousSecond === null) {
+    setPreviousSecond(currentSecond);
+    return;
+  }
+
+  const diff = currentSecond - previousSecond;
+
+  // 🚫 If jump is more than 1 second, it means skip/seek
+  if (diff > 1 || diff < 0) {
+    setPreviousSecond(currentSecond);
+    return;
+  }
+
+  // ✅ Count ONLY real natural playback (diff === 1)
+  if (diff === 1) {
+    setWatchedSeconds(prev => {
+      const updated = new Set(prev);
+      updated.add(currentSecond);
+      return updated;
+    });
+  }
+
+  setPreviousSecond(currentSecond);
+}}
               onReadyForDisplay={onReadyForDisplay}
             />
             {/* {batterySaverOn && (
@@ -681,4 +751,17 @@ const styles = StyleSheet.create({
   activeIndicator: {
     marginLeft: 8,
   },
+  trackingContainer: {
+  alignItems: 'flex-end',
+},
+
+trackingText: {
+  fontSize: 16,
+  fontWeight: '700',
+},
+
+incompleteText: {
+  fontSize: 11,
+  color: '#f87171',
+},
 });
