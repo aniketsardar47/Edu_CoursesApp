@@ -111,7 +111,7 @@ const VideoPlayer = () => {
     // Pause video after the 3-second delay you requested
     setTimeout(() => {
       videoRef.current?.pauseAsync();
-    }, 3000);
+    }, 30000);
   };
 
   // Initialize timer on mount
@@ -154,25 +154,65 @@ const VideoPlayer = () => {
       .catch((err) => console.error("Fetch error:", err));
   }, [courseId, videoId]);
 
+  //   useEffect(() => {
+  //   const fetchDescription = async () => {
+  //     if (!videoData?.descriptionUrl) return;
+  //     try {
+  //       setLoadingDescription(true);
+  //       const response = await fetch(videoData.descriptionUrl);
+  //       const text = await response.text();
+
+  //       setDescriptionText(text);
+  //       setOriginalText(text); // IMPORTANT: store original text
+
+  //     } catch {
+  //       setDescriptionText("Description not available.");
+  //     } finally {
+  //       setLoadingDescription(false);
+  //     }
+  //   };
+  //   fetchDescription();
+  // }, [videoData?.descriptionUrl]);
+
   useEffect(() => {
-    const fetchDescription = async () => {
-      if (!videoData?.descriptionUrl) return;
+    const fetchInitialDescription = async () => {
+      // Note: checking for english inside the new descriptionUrls object
+      if (!videoData?.descriptionUrls?.english) {
+        // Fallback to legacy single URL if present
+        if (videoData?.descriptionUrl) {
+          try {
+            setLoadingDescription(true);
+            const response = await fetch(videoData.descriptionUrl);
+            const text = await response.text();
+            setDescriptionText(text);
+            setOriginalText(text);
+          } catch (error) {
+            console.error("Error fetching legacy description:", error);
+          } finally {
+            setLoadingDescription(false);
+          }
+        }
+        return;
+      }
+
       try {
         setLoadingDescription(true);
-        const response = await fetch(videoData.descriptionUrl);
+        const response = await fetch(videoData.descriptionUrls.english);
         const text = await response.text();
 
         setDescriptionText(text);
-        setOriginalText(text); // IMPORTANT: store original text
-
-      } catch {
+        setOriginalText(text); // Keep English as the reference
+        setSelectedLanguage("en"); // Reset picker to English on video change
+      } catch (error) {
+        console.error("Error fetching description:", error);
         setDescriptionText("Description not available.");
       } finally {
         setLoadingDescription(false);
       }
     };
-    fetchDescription();
-  }, [videoData?.descriptionUrl]);
+
+    fetchInitialDescription();
+  }, [videoData?.descriptionUrls?.english, videoData?.descriptionUrl]);
 
   const renderFormattedText = (text) => {
     if (!text) return null;
@@ -243,49 +283,85 @@ const VideoPlayer = () => {
   };
 
   const translateDescription = async (targetLang) => {
-    if (!originalText) return;
+    if (!videoData?.descriptionUrls) {
+      // Legacy API-based translation fallback if descriptionUrls is missing
+      if (!originalText) return;
 
+      const languageMap = {
+        en: "English",
+        hi: "Hindi",
+        mr: "Marathi",
+        te: "Telugu",
+        ta: "Tamil",
+      };
+
+      if (targetLang === "en") {
+        setDescriptionText(originalText);
+        return;
+      }
+
+      try {
+        setTranslating(true);
+        const response = await fetch(
+          "http://10.197.15.102:7777/api/translate/translate",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              text: originalText,
+              target: languageMap[targetLang],
+            }),
+          }
+        );
+        const data = await response.json();
+        if (data.translatedText) {
+          setDescriptionText(data.translatedText);
+        } else {
+          Alert.alert("Translation failed");
+        }
+      } catch (error) {
+        console.log("Translation Error:", error);
+        Alert.alert("Translation Failed");
+      } finally {
+        setTranslating(false);
+      }
+      return;
+    }
+
+    // Map the picker values (en, hi, etc.) to your JSON keys (english, hindi, etc.)
     const languageMap = {
-      en: "English",
-      hi: "Hindi",
-      mr: "Marathi",
-      te: "Telugu",
-      ta: "Tamil",
+      en: "english",
+      hi: "hindi",
+      mr: "marathi",
+      te: "telugu",
+      ta: "tamil",
     };
 
-    // If English → restore original
-    if (targetLang === "en") {
-      setDescriptionText(originalText);
+    const targetKey = languageMap[targetLang];
+    const targetUrl = videoData.descriptionUrls[targetKey];
+
+    if (!targetUrl) {
+      Alert.alert("Error", "Translation file not found for this language.");
       return;
     }
 
     try {
       setTranslating(true);
 
-      const response = await fetch(
-        "http://10.197.15.102:7777/api/translate/translate",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            text: originalText,
-            target: languageMap[targetLang],
-          }),
-        }
-      );
+      // Fetch the text file directly from the URL (ImageKit)
+      const response = await fetch(targetUrl);
+      const text = await response.text();
 
-      const data = await response.json();
-
-      if (data.translatedText) {
-        setDescriptionText(data.translatedText);
+      if (text) {
+        setDescriptionText(text);
       } else {
-        Alert.alert("Translation failed");
+        Alert.alert("Error", "Translation file is empty.");
       }
     } catch (error) {
-      console.log("Translation Error:", error);
-      Alert.alert("Translation Failed");
+      console.error("Fetch Error:", error);
+      Alert.alert("Failed", "Could not load the translated description.");
     } finally {
       setTranslating(false);
     }
@@ -413,11 +489,11 @@ const VideoPlayer = () => {
                 if (status.didJustFinish) {
                   console.log(`Video finished: ${videoId}`);
                   const durationSeconds = Math.floor(status.durationMillis / 1000);
-                  
+
                   // Force 100% watched on finish
                   watchedMillisRef.current = status.durationMillis;
                   setLocalWatchedMillis(status.durationMillis);
-                  
+
                   dispatch(updateVideoProgress({
                     videoId,
                     watchedSeconds: durationSeconds,
@@ -597,26 +673,33 @@ const VideoPlayer = () => {
             <Text style={styles.sectionTitle}>DESCRIPTION</Text>
           </View>
 
-          {/* Language Selector */}
-          {/* Language Selector */}
-          <View style={styles.languagePickerWrapper}>
-            <Picker
-              selectedValue={selectedLanguage}
-              dropdownIconColor="#bb86fc"
-              mode="dropdown"
-              style={styles.languagePicker}
-              itemStyle={styles.languagePickerItem} // iOS fix
-              onValueChange={(itemValue) => {
-                setSelectedLanguage(itemValue);
-                translateDescription(itemValue);
-              }}
-            >
-              <Picker.Item label="English" value="en" />
-              <Picker.Item label="Hindi" value="hi" />
-              <Picker.Item label="Marathi" value="mr" />
-              <Picker.Item label="Telugu" value="te" />
-              <Picker.Item label="Tamil" value="ta" />
-            </Picker>
+          {/* NEW: Styled Language Display Card */}
+          <View style={styles.languageDisplayCard}>
+            <Text style={styles.selectedLanguageText}>
+              {selectedLanguage === 'en' ? 'English' :
+                selectedLanguage === 'hi' ? 'Hindi' :
+                  selectedLanguage === 'mr' ? 'Marathi' :
+                    selectedLanguage === 'te' ? 'Telugu' : 'Tamil'}
+            </Text>
+
+            {/* Hidden Picker that triggers on tap of the arrow */}
+            <View style={styles.pickerOverlayContainer}>
+              <Picker
+                selectedValue={selectedLanguage}
+                dropdownIconColor="#bb86fc"
+                style={styles.hiddenPicker}
+                onValueChange={(itemValue) => {
+                  setSelectedLanguage(itemValue);
+                  translateDescription(itemValue);
+                }}
+              >
+                <Picker.Item label="English" value="en" />
+                <Picker.Item label="Hindi" value="hi" />
+                <Picker.Item label="Marathi" value="mr" />
+                <Picker.Item label="Telugu" value="te" />
+                <Picker.Item label="Tamil" value="ta" />
+              </Picker>
+            </View>
           </View>
 
           <View style={styles.descriptionContainer}>
@@ -740,14 +823,16 @@ const VideoPlayer = () => {
         </Modal>
 
       </ScrollView>
-      {isIdle && (
-        <BlurView
-          intensity={60}
-          tint="dark"
-          style={[StyleSheet.absoluteFill, { zIndex: 999 }]}
-        />
-      )}
-    </View>
+      {
+        isIdle && (
+          <BlurView
+            intensity={60}
+            tint="dark"
+            style={[StyleSheet.absoluteFill, { zIndex: 999 }]}
+          />
+        )
+      }
+    </View >
   );
 };
 
@@ -1206,6 +1291,44 @@ const styles = StyleSheet.create({
 
   languagePickerItem: {
     color: "#ffffff",
+  },
+  languageDisplayCard: {
+    backgroundColor: "#0a0a0a",
+    borderRadius: 15,
+    borderWidth: 1,
+    borderColor: "#2a2a2a",
+    paddingHorizontal: 16,
+    paddingVertical: 18,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+    position: 'relative',
+  },
+  selectedLanguageText: {
+    color: "#ffffff",
+    fontSize: 16, // Matches the large text in your image
+    fontWeight: "400",
+  },
+  pickerOverlayContainer: {
+    position: 'absolute',
+    right: 10,
+    top: 0,
+    bottom: 0,
+    width: 50, // Only covers the arrow area
+    justifyContent: 'center',
+  },
+  hiddenPicker: {
+    width: '100%',
+    color: 'transparent', // Keeps only the arrow visible on Android
+    opacity: 1,
+  },
+  // Ensure descriptionContainer is updated for better spacing
+  descriptionContainer: {
+    backgroundColor: '#0a0a0a',
+    borderRadius: 12,
+    padding: 15,
+    minHeight: 100, // Provides a clean empty state like your image
   },
 });
 

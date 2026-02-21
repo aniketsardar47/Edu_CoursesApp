@@ -45,11 +45,11 @@ const VideoPlayerScreen = () => {
 
   useEffect(() => {
     if (savedProgress) {
-      watchedMillisRef.current = savedProgress.watchedSeconds * 1000;
-      setLocalWatchedMillis(savedProgress.watchedSeconds * 1000);
-      setTotalDurationMillis(savedProgress.totalDuration * 1000);
-      lastPositionRef.current = savedProgress.lastPosition;
-      setLastPosition(savedProgress.lastPosition);
+      watchedMillisRef.current = (savedProgress.watchedSeconds || 0) * 1000;
+      setLocalWatchedMillis((savedProgress.watchedSeconds || 0) * 1000);
+      setTotalDurationMillis((savedProgress.totalDuration || 0) * 1000);
+      lastPositionRef.current = savedProgress.lastPosition || 0;
+      setLastPosition(savedProgress.lastPosition || 0);
     } else {
       watchedMillisRef.current = 0;
       setLocalWatchedMillis(0);
@@ -202,6 +202,13 @@ const VideoPlayerScreen = () => {
 
   const currentVideoUrl = VIDEO_SOURCES[quality] || videoData.url;
 
+  // ================= VIDEO TRACKING CALCULATION =================
+  const watchedPercentage = totalDurationMillis > 0
+    ? ((localWatchedMillis / totalDurationMillis) * 100).toFixed(1)
+    : 0;
+
+  const isCompleted = Number(watchedPercentage) >= 99; // Using 99% for more reliable completion
+
   return (
     <View style={styles.container}>
       <ScrollView
@@ -222,36 +229,64 @@ const VideoPlayerScreen = () => {
         {/* Title Section with Purple Accent */}
         <View style={styles.titleSection}>
           <View style={styles.titleAccent} />
-          <View style={styles.titleContent}>
-            <Text style={styles.title}>{videoData.title}</Text>
+          <View style={[styles.titleContent, {
+            flexDirection: 'row',
+            justifyContent: 'space-between',
+            alignItems: 'center'
+          }]}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.title}>{videoData.title}</Text>
 
-            {/* Battery and Speed Info in Row */}
-            <View style={styles.infoRow}>
-              {batteryLevel !== null && (
-                <View style={styles.infoChip}>
-                  <Ionicons
-                    name={batterySaverOn ? "battery-dead" : "battery-full"}
-                    size={14}
-                    color={batterySaverOn ? "#bb86fc" : "#4ade80"}
-                  />
-                  <Text style={[styles.infoChipText, batterySaverOn && styles.batteryWarning]}>
-                    {batteryLevel}% {batterySaverOn ? "(Saver)" : ""}
-                  </Text>
-                </View>
+              <View style={styles.infoRow}>
+                {batteryLevel !== null && (
+                  <View style={styles.infoChip}>
+                    <Ionicons
+                      name={batterySaverOn ? "battery-dead" : "battery-full"}
+                      size={14}
+                      color={batterySaverOn ? "#bb86fc" : "#4ade80"}
+                    />
+                    <Text style={[
+                      styles.infoChipText,
+                      batterySaverOn && styles.batteryWarning
+                    ]}>
+                      {batteryLevel}% {batteryLevel <= 20 ? "(Saver)" : ""}
+                    </Text>
+                  </View>
+                )}
+
+                {networkSpeed && (
+                  <View style={styles.infoChip}>
+                    <Ionicons name="speedometer" size={14} color="#bb86fc" />
+                    <Text style={styles.infoChipText}>{networkSpeed}</Text>
+                  </View>
+                )}
+              </View>
+            </View>
+
+            <View style={styles.trackingContainer}>
+              <Text style={[
+                styles.trackingText,
+                { color: isCompleted ? "#4ade80" : "#bb86fc" }
+              ]}>
+                {watchedPercentage}%
+              </Text>
+
+              {!isCompleted && (
+                <Text style={styles.incompleteText}>
+                  In Progress
+                </Text>
               )}
-
-              {networkSpeed && (
-                <View style={styles.infoChip}>
-                  <Ionicons name="speedometer" size={14} color="#bb86fc" />
-                  <Text style={styles.infoChipText}>{networkSpeed}</Text>
-                </View>
+              {isCompleted && (
+                <Text style={[styles.incompleteText, { color: '#4ade80' }]}>
+                  Completed
+                </Text>
               )}
             </View>
           </View>
         </View>
 
         {/* Video Player Card */}
-        <View style={styles.playerCard}>
+        < View style={styles.playerCard} >
           <View style={[styles.playerBox, batterySaverOn && styles.batterySaverVideo]}>
             <Video
               ref={videoRef}
@@ -277,15 +312,28 @@ const VideoPlayerScreen = () => {
 
                     const currentSeconds = Math.floor(watchedMillisRef.current / 1000);
                     const lastSavedSeconds = savedProgress?.watchedSeconds || 0;
+                    const durationSeconds = Math.floor(status.durationMillis / 1000);
 
                     if (currentSeconds > lastSavedSeconds + 3) {
                       dispatch(updateVideoProgress({
                         videoId,
                         watchedSeconds: currentSeconds,
-                        totalDuration: Math.floor(status.durationMillis / 1000),
+                        totalDuration: durationSeconds,
                         lastPosition: status.positionMillis
                       }));
                     }
+                  }
+
+                  if (status.didJustFinish) {
+                    const durationSeconds = Math.floor(status.durationMillis / 1000);
+                    watchedMillisRef.current = status.durationMillis;
+                    setLocalWatchedMillis(status.durationMillis);
+                    dispatch(updateVideoProgress({
+                      videoId,
+                      watchedSeconds: durationSeconds,
+                      totalDuration: durationSeconds,
+                      lastPosition: status.durationMillis
+                    }));
                   }
                   lastPositionRef.current = status.positionMillis;
                 }
@@ -309,10 +357,10 @@ const VideoPlayerScreen = () => {
               </View>
             )} */}
           </View>
-        </View>
+        </View >
 
         {/* Learning Progress Card */}
-        <View style={styles.qualityCard}>
+        < View style={styles.qualityCard} >
           <View style={styles.qualityHeader}>
             <Ionicons name="analytics-outline" size={18} color="#bb86fc" />
             <Text style={styles.qualityHeaderText}>LEARNING PROGRESS</Text>
@@ -338,10 +386,10 @@ const VideoPlayerScreen = () => {
               </Text>
             </View>
           </View>
-        </View>
+        </View >
 
         {/* Quality Selector - Matching Previous Design */}
-        <View style={styles.qualityCard}>
+        < View style={styles.qualityCard} >
           <View style={styles.qualityHeader}>
             <Ionicons name="settings-outline" size={18} color="#bb86fc" />
             <Text style={styles.qualityHeaderText}>VIDEO QUALITY</Text>
@@ -373,7 +421,7 @@ const VideoPlayerScreen = () => {
               </TouchableOpacity>
             ))}
           </View>
-        </View>
+        </View >
 
         {/* Description Card */}
         {/* <View style={styles.descriptionCard}>
@@ -449,8 +497,8 @@ const VideoPlayerScreen = () => {
             })}
           </View>
         </View>
-      </ScrollView>
-    </View>
+      </ScrollView >
+    </View >
   );
 };
 
@@ -800,5 +848,16 @@ const styles = StyleSheet.create({
     color: '#888',
     fontSize: 12,
     fontWeight: '600',
+  },
+  trackingContainer: {
+    alignItems: 'flex-end',
+  },
+  trackingText: {
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  incompleteText: {
+    fontSize: 11,
+    color: '#bb86fc', // Using purple instead of red for a more consistent theme
   },
 });
