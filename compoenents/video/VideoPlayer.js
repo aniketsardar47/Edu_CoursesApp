@@ -9,7 +9,9 @@ import {
   TouchableOpacity,
   Dimensions,
   Alert,
+  Platform,
 } from "react-native";
+import { Picker } from "@react-native-picker/picker";
 import { useRoute, useNavigation, useIsFocused } from "@react-navigation/native"; 
 import { Video } from "expo-av";
 import { downloadVideo } from "../utils/DownloadManager";
@@ -38,6 +40,9 @@ const VideoPlayer = () => {
   const [quality, setQuality] = useState("Auto");
   const [localUri, setLocalUri] = useState(null);
   const [descriptionText, setDescriptionText] = useState("");
+  const [selectedLanguage, setSelectedLanguage] = useState("en");
+  const [originalText, setOriginalText] = useState("");
+  const [translating, setTranslating] = useState(false);
   const [loadingDescription, setLoadingDescription] = useState(false);
   const [showFullDesc, setShowFullDesc] = useState(false);
   const [playbackPosition, setPlaybackPosition] = useState(0);
@@ -52,6 +57,8 @@ const VideoPlayer = () => {
   
   const rawSpeed = useRealtimeSpeed(3000) ?? 0;
   const speed = batterySaverOn ? 0 : rawSpeed;
+
+  
 
   const resetIdleTimer = () => {
     // If it was blurred, remove blur and play
@@ -111,28 +118,31 @@ const VideoPlayer = () => {
 
   useEffect(() => {
     if (!courseId || !videoId) return;
-    fetch(`http://10.197.15.60:7777/api/videos/course/${courseId}/${videoId}`)
+    fetch(`http://10.107.25.116:7777/api/videos/course/${courseId}/${videoId}`)
       .then((res) => res.json())
       .then(setVideoData)
       .catch((err) => console.error("Fetch error:", err));
   }, [courseId, videoId]);
 
   useEffect(() => {
-    const fetchDescription = async () => {
-      if (!videoData?.descriptionUrl) return;
-      try {
-        setLoadingDescription(true);
-        const response = await fetch(videoData.descriptionUrl);
-        const text = await response.text();
-        setDescriptionText(text);
-      } catch {
-        setDescriptionText("Description not available.");
-      } finally {
-        setLoadingDescription(false);
-      }
-    };
-    fetchDescription();
-  }, [videoData?.descriptionUrl]);
+  const fetchDescription = async () => {
+    if (!videoData?.descriptionUrl) return;
+    try {
+      setLoadingDescription(true);
+      const response = await fetch(videoData.descriptionUrl);
+      const text = await response.text();
+
+      setDescriptionText(text);
+      setOriginalText(text); // IMPORTANT: store original text
+
+    } catch {
+      setDescriptionText("Description not available.");
+    } finally {
+      setLoadingDescription(false);
+    }
+  };
+  fetchDescription();
+}, [videoData?.descriptionUrl]);
 
   const renderFormattedText = (text) => {
     if (!text) return null;
@@ -195,6 +205,56 @@ const VideoPlayer = () => {
     const supported = await Linking.canOpenURL(url);
     supported ? Linking.openURL(url) : Alert.alert("Cannot open file");
   };
+
+  const translateDescription = async (targetLang) => {
+  if (!originalText) return;
+
+  const languageMap = {
+    en: "English",
+    hi: "Hindi",
+    mr: "Marathi",
+    te: "Telugu",
+    ta: "Tamil",
+  };
+
+  // If English → restore original
+  if (targetLang === "en") {
+    setDescriptionText(originalText);
+    return;
+  }
+
+  try {
+    setTranslating(true);
+
+    const response = await fetch(
+      "http://10.107.25.116:7777/api/translate/translate",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          text: originalText,
+          target: languageMap[targetLang],
+        }),
+      }
+    );
+
+    const data = await response.json();
+
+    if (data.translatedText) {
+      setDescriptionText(data.translatedText);
+    } else {
+      Alert.alert("Translation failed");
+    }
+  } catch (error) {
+    console.log("Translation Error:", error);
+    Alert.alert("Translation Failed");
+  } finally {
+    setTranslating(false);
+  }
+};
+
 
   if (!videoData || !sourceUri) {
     return (
@@ -390,8 +450,30 @@ const VideoPlayer = () => {
             <Text style={styles.sectionTitle}>DESCRIPTION</Text>
           </View>
           
+          {/* Language Selector */}
+{/* Language Selector */}
+<View style={styles.languagePickerWrapper}>
+  <Picker
+    selectedValue={selectedLanguage}
+    dropdownIconColor="#bb86fc"
+    mode="dropdown"
+    style={styles.languagePicker}
+    itemStyle={styles.languagePickerItem} // iOS fix
+    onValueChange={(itemValue) => {
+      setSelectedLanguage(itemValue);
+      translateDescription(itemValue);
+    }}
+  >
+    <Picker.Item label="English" value="en" />
+    <Picker.Item label="Hindi" value="hi" />
+    <Picker.Item label="Marathi" value="mr" />
+    <Picker.Item label="Telugu" value="te" />
+    <Picker.Item label="Tamil" value="ta" />
+  </Picker>
+</View>
+
           <View style={styles.descriptionContainer}>
-            {loadingDescription ? (
+            {loadingDescription || translating ? (
               <ActivityIndicator size="small" color="#bb86fc" />
             ) : (
               <>
@@ -905,7 +987,24 @@ const styles = StyleSheet.create({
     marginTop: 10,
     fontSize: 16,
     fontWeight: '600',
-  }
+  },
+  languagePickerWrapper: {
+  backgroundColor: "#0a0a0a",
+  borderRadius: 12,
+  borderWidth: 1,
+  borderColor: "#2a2a2a",
+  marginBottom: 15,
+  overflow: "hidden",
+},
+
+languagePicker: {
+  color: "#ffffff",
+  height: 50,
+},
+
+languagePickerItem: {
+  color: "#ffffff",
+},
 });
 
 export default VideoPlayer;
