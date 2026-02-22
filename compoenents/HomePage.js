@@ -12,12 +12,14 @@ import {
 import { useNavigation } from "@react-navigation/native";
 import { BookOpen, Clock, Users, PlayCircle, Zap } from "lucide-react-native";
 import * as Battery from "expo-battery";
-import { useSelector } from "react-redux"; // ✅ Add this
-import { DownloadCloud, ChevronRight } from "lucide-react-native";
+import { useSelector, useDispatch } from "react-redux"; // ✅ Update this
+import { DownloadCloud, ChevronRight, Trash2 } from "lucide-react-native";
 import NetInfo from "@react-native-community/netinfo";
+import { Alert } from "react-native";
 
 const HomePage = () => {
   const navigation = useNavigation();
+  const dispatch = useDispatch();
 
   const [courses, setCourses] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -321,6 +323,30 @@ const HomePage = () => {
               )}
             />
           )}
+        </View>
+
+        {/* 🗑️ RESET DATA BUTTON */}
+        <View style={styles.resetSection}>
+          <TouchableOpacity
+            style={styles.resetButton}
+            onPress={() => {
+              Alert.alert(
+                "Reset App Data",
+                "Are you sure you want to delete all app data? This will clear your downloads and watch progress.",
+                [
+                  { text: "Cancel", style: "cancel" },
+                  {
+                    text: "Reset Everything",
+                    style: "destructive",
+                    onPress: () => dispatch({ type: "RESET_APP" })
+                  }
+                ]
+              );
+            }}
+          >
+            <Trash2 size={18} color="#f87171" />
+            <Text style={styles.resetButtonText}>Clear All App Data</Text>
+          </TouchableOpacity>
         </View>
       </ScrollView>
     </View>

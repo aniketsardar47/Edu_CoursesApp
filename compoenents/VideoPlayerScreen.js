@@ -292,7 +292,7 @@ const VideoPlayerScreen = () => {
               </View>
             </View>
 
-            <View style={styles.trackingContainer}>
+            {/* <View style={styles.trackingContainer}>
               <Text style={[
                 styles.trackingText,
                 { color: isCompleted ? "#4ade80" : "#bb86fc" }
@@ -310,7 +310,7 @@ const VideoPlayerScreen = () => {
                   Completed
                 </Text>
               )}
-            </View>
+            </View> */}
           </View>
         </View>
 

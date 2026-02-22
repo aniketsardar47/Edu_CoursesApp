@@ -8,7 +8,7 @@ import videoProgressReducer from './VideoProgressSlice';
 const persistConfig = {
   key: 'root',
   storage: AsyncStorage,
-  whitelist: ['downloads', 'videoProgress'], 
+  whitelist: ['downloads', 'videoProgress'],
 };
 
 const rootReducer = combineReducers({
@@ -16,7 +16,23 @@ const rootReducer = combineReducers({
   videoProgress: videoProgressReducer,
 });
 
-const persistedReducer = persistReducer(persistConfig, rootReducer);
+const resettableRootReducer = (state, action) => {
+  if (action.type === 'RESET_APP') {
+    // This will reset all reducers to their initial state
+    return rootReducer(undefined, action);
+  }
+
+  if (action.type === 'LOGOUT') {
+    return {
+      ...state,
+      user: undefined,
+    };
+  }
+
+  return rootReducer(state, action);
+};
+
+const persistedReducer = persistReducer(persistConfig, resettableRootReducer);
 
 // ✅ Make sure this is exported
 export const store = configureStore({

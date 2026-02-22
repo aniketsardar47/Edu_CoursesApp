@@ -24,7 +24,7 @@ export const useVideoInactivity = (videoRef) => {
         // Set new timer for 3 minutes (180,000ms) to trigger Blur
         idleTimerRef.current = setTimeout(() => {
             handleInactivity();
-        }, 180000);
+        }, 10000);
     }, [isIdle, videoRef]);
 
     const handleInactivity = useCallback(() => {

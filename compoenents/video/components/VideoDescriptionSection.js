@@ -13,6 +13,8 @@ const VideoDescriptionSection = ({
     isOfflineCache,
     onTranslate,
     onSpeak,
+    onToggleSpeak,
+    isSpeaking,
     onShowFullDesc
 }) => {
     return (
@@ -89,10 +91,23 @@ const VideoDescriptionSection = ({
                         )}
 
                         {selectedLanguage === "en" && descriptionText && (
-                            <TouchableOpacity style={styles.speakBtn} onPress={onSpeak}>
-                                <Ionicons name="volume-high-outline" size={20} color="#bb86fc" />
-                                <Text style={styles.speakText}>Listen to Description</Text>
-                            </TouchableOpacity>
+                            <View style={styles.speakRow}>
+                                <TouchableOpacity style={styles.speakBtn} onPress={onSpeak}>
+                                    <Ionicons name="volume-high-outline" size={22} color="#bb86fc" />
+                                    <Text style={styles.speakText}>Listen</Text>
+                                </TouchableOpacity>
+
+                                <TouchableOpacity
+                                    style={styles.playPauseBtn}
+                                    onPress={onToggleSpeak}
+                                >
+                                    <Ionicons
+                                        name={isSpeaking ? "pause-circle" : "play-circle"}
+                                        size={28}
+                                        color="#bb86fc"
+                                    />
+                                </TouchableOpacity>
+                            </View>
                         )}
                     </>
                 )}
@@ -192,18 +207,31 @@ const styles = StyleSheet.create({
         fontWeight: '600',
     },
     speakBtn: {
-        flexDirection: 'row',
-        alignItems: 'center',
+        flexDirection: "row",
+        alignItems: "center",
+        backgroundColor: "#111",
+        paddingVertical: 10,
+        paddingHorizontal: 16,
+        borderRadius: 14,
+    },
+    speakText: {
+        color: "#bb86fc",
+        fontSize: 14,
+        fontWeight: "600",
+        marginLeft: 8,
+    },
+    speakRow: {
+        flexDirection: "row",
+        alignItems: "center",
         marginTop: 15,
         paddingTop: 15,
         borderTopWidth: 1,
-        borderTopColor: '#222',
-        gap: 8,
+        borderTopColor: "#222",
+        gap: 16,
     },
-    speakText: {
-        color: '#bb86fc',
-        fontSize: 13,
-        fontWeight: '500',
+
+    playPauseBtn: {
+        padding: 6,
     },
 });
 

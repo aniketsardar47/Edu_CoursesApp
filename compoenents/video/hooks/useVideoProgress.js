@@ -44,56 +44,66 @@ export const useVideoProgress = (videoId, videoRef) => {
 
         setShouldResume(true);
     }, [videoId, savedProgress]);
+const onPlaybackStatusUpdate = useCallback((status) => {
+    if (!status.isLoaded) return;
 
-    const onPlaybackStatusUpdate = useCallback((status) => {
-        if (!status.isLoaded) return;
+    if (status.durationMillis) {
+        setTotalDurationMillis(status.durationMillis);
+    }
 
-        if (status.durationMillis) {
-            setTotalDurationMillis(status.durationMillis);
-        }
+    let diff = status.positionMillis - lastPositionRef.current;
 
-        let diff = status.positionMillis - lastPositionRef.current;
+    // Ignore backward seek or large jumps
+    if (diff < 0 || diff > 3000) {
+        lastPositionRef.current = status.positionMillis;
+        return;
+    }
 
-        // Ignore backward seek or large jumps
-        if (diff < 0 || diff > 3000) {
-            lastPositionRef.current = status.positionMillis;
-            return;
-        }
+    // If video already completed, do not accumulate further progress
+    const isCompleted = watchedMillisRef.current >= status.durationMillis;
 
-        if (status.isPlaying) {
+    if (status.isPlaying) {
+        if (!isCompleted) {
             watchedMillisRef.current += diff;
             setLocalWatchedMillis(watchedMillisRef.current);
-
-            const currentSeconds = Math.floor(watchedMillisRef.current / 1000);
-            const durationSeconds = Math.floor(status.durationMillis / 1000);
-            const lastSavedSeconds = savedProgress?.watchedSeconds || 0;
-
-            // Sync every 3 seconds
-            if (currentSeconds > lastSavedSeconds + 3) {
-                dispatch(updateVideoProgress({
-                    videoId,
-                    watchedSeconds: currentSeconds,
-                    totalDuration: durationSeconds,
-                    lastPosition: status.positionMillis
-                }));
-            }
-        }
-
-        if (status.didJustFinish) {
-            const durationSeconds = Math.floor(status.durationMillis / 1000);
+        } else {
+            // Keep it capped at full duration (100%)
             watchedMillisRef.current = status.durationMillis;
             setLocalWatchedMillis(status.durationMillis);
-
-            dispatch(updateVideoProgress({
-                videoId,
-                watchedSeconds: durationSeconds,
-                totalDuration: durationSeconds,
-                lastPosition: status.durationMillis
-            }));
         }
 
-        lastPositionRef.current = status.positionMillis;
-    }, [videoId, savedProgress, dispatch]);
+        const currentSeconds = Math.floor(watchedMillisRef.current / 1000);
+        const durationSeconds = Math.floor(status.durationMillis / 1000);
+        const lastSavedSeconds = savedProgress?.watchedSeconds || 0;
+
+        // Sync every 3 seconds
+        if (currentSeconds > lastSavedSeconds + 3) {
+            dispatch(updateVideoProgress({
+                videoId,
+                watchedSeconds: currentSeconds,
+                totalDuration: durationSeconds,
+                lastPosition: status.positionMillis
+            }));
+        }
+    }
+
+    if (status.didJustFinish) {
+        const durationSeconds = Math.floor(status.durationMillis / 1000);
+
+        // Mark fully completed
+        watchedMillisRef.current = status.durationMillis;
+        setLocalWatchedMillis(status.durationMillis);
+
+        dispatch(updateVideoProgress({
+            videoId,
+            watchedSeconds: durationSeconds,
+            totalDuration: durationSeconds,
+            lastPosition: status.durationMillis
+        }));
+    }
+
+    lastPositionRef.current = status.positionMillis;
+}, [videoId, savedProgress, dispatch]);
 
     const onLoad = useCallback(() => {
         const targetPos = savedProgress?.lastPosition || 0;

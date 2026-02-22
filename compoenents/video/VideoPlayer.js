@@ -15,6 +15,7 @@ import { BlurView } from 'expo-blur';
 import { Ionicons } from "@expo/vector-icons";
 import { useDispatch } from "react-redux";
 
+
 // Redux & Utils
 import { addDownload } from "../redux/DownloadSlice";
 import { createDownloadResumable, encryptFile, downloadMetadata } from "../utils/DownloadManager";
@@ -51,6 +52,7 @@ const VideoPlayer = () => {
   const [isManualOffline, setIsManualOffline] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
 
   // 1. Meta & Env Hook
   const { videoData, batterySaverOn, speed, isConnected } = useVideoMetadata(courseId, videoId, quality === "Auto");
@@ -103,6 +105,28 @@ const VideoPlayer = () => {
   }, [quality, speed, videoData, normalizeUrl]);
 
   const sourceUri = localUri || currentUri;
+
+
+
+  const handleSpeak = () => {
+    if (!descriptionText) return;
+
+    speakEnglishText(descriptionText, () => {
+      setIsSpeaking(false);
+    });
+
+    setIsSpeaking(true);
+  };
+
+  const handleToggleSpeak = () => {
+    if (isSpeaking) {
+      stopSpeech();
+      setIsSpeaking(false);
+    } else {
+      handleSpeak();
+    }
+  };
+
 
   const handleDownloadAction = async () => {
     if (isDownloading || !videoData) return;
@@ -203,14 +227,14 @@ const VideoPlayer = () => {
             <View style={styles.titleAccent} />
             <Text style={styles.videoTitle}>{videoData.title || "Video Lesson"}</Text>
           </View>
-          <View style={styles.trackingContainer}>
+          {/* <View style={styles.trackingContainer}>
             <Text style={[styles.trackingText, { color: Number(watchedPercentage) >= 99 ? "#4ade80" : "#bb86fc" }]}>
               {watchedPercentage}%
             </Text>
             <Text style={[styles.incompleteText, Number(watchedPercentage) >= 99 && { color: '#4ade80' }]}>
               {Number(watchedPercentage) >= 99 ? "Completed" : "In Progress"}
             </Text>
-          </View>
+          </View> */}
         </View>
 
         {/* Modular Components */}
@@ -242,10 +266,12 @@ const VideoPlayer = () => {
           translating={translating}
           loadingDescription={loadingDescription}
           isOfflineCache={isOfflineCache}
-          isManualOffline={isManualOffline}
-          setIsManualOffline={setIsManualOffline}
           onTranslate={translateDescription}
-          onSpeak={() => speakEnglishText(descriptionText)}
+
+          onSpeak={handleSpeak}
+          onToggleSpeak={handleToggleSpeak}
+          isSpeaking={isSpeaking}
+
           onShowFullDesc={() => setShowFullDesc(true)}
         />
 
