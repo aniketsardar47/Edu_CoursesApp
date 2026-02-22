@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo, useRef } from "react";
+import React, { useState, useMemo, useRef, useCallback } from "react";
 import {
   View,
   Text,
@@ -7,336 +7,142 @@ import {
   ActivityIndicator,
   ScrollView,
   TouchableOpacity,
-  Dimensions,
   Alert,
-  Platform,
 } from "react-native";
-import { Picker } from "@react-native-picker/picker";
 import { useRoute, useNavigation, useIsFocused } from "@react-navigation/native";
 import { Video } from "expo-av";
-import { downloadVideo } from "../utils/DownloadManager";
-import * as FileSystemLegacy from "expo-file-system/legacy";
+import { BlurView } from 'expo-blur';
+import { Ionicons } from "@expo/vector-icons";
+import { useDispatch } from "react-redux";
+
+// Redux & Utils
+import { addDownload } from "../redux/DownloadSlice";
+import { createDownloadResumable, encryptFile, downloadMetadata } from "../utils/DownloadManager";
+import { speakEnglishText, stopSpeech } from "../utils/TextToSpeech";
 import * as Linking from "expo-linking";
 import * as Sharing from "expo-sharing";
-import { Ionicons } from "@expo/vector-icons";
-import useRealtimeSpeed from "./useRealtimeSpeed";
-import * as Battery from "expo-battery";
-import { BlurView } from 'expo-blur';
-import { useDispatch, useSelector } from "react-redux"; // ADD THIS
-import { addDownload } from "../redux/DownloadSlice";
-import { updateVideoProgress } from "../redux/VideoProgressSlice";
-import { createDownloadResumable, encryptFile } from "../utils/DownloadManager";
-import { speakEnglishText, stopSpeech } from "../utils/TextToSpeech";
+import * as FileSystemLegacy from "expo-file-system/legacy";
 
-const { width } = Dimensions.get("window");
+// Custom Hooks
+import { useVideoMetadata } from "./hooks/useVideoMetadata";
+import { useVideoInactivity } from "./hooks/useVideoInactivity";
+import { useVideoTranslation } from "./hooks/useVideoTranslation";
+import { useVideoProgress } from "./hooks/useVideoProgress";
+import { renderFormattedText } from "./utils/FormattingUtils";
+
+// Sub-Components
+import VideoProgressCard from "./components/VideoProgressCard";
+import VideoActionRow from "./components/VideoActionRow";
+import VideoQualitySelector from "./components/VideoQualitySelector";
+import VideoDescriptionSection from "./components/VideoDescriptionSection";
+import VideoAttachmentsList from "./components/VideoAttachmentsList";
 
 const VideoPlayer = () => {
-  const dispatch = useDispatch();
   const route = useRoute();
   const navigation = useNavigation();
   const isFocused = useIsFocused();
+  const dispatch = useDispatch();
   const { courseId, videoId } = route.params;
 
   const videoRef = useRef(null);
-  const [videoData, setVideoData] = useState(null);
   const [quality, setQuality] = useState("Auto");
   const [localUri, setLocalUri] = useState(null);
-  const [descriptionText, setDescriptionText] = useState("");
-  const [selectedLanguage, setSelectedLanguage] = useState("en");
-  const [originalText, setOriginalText] = useState("");
-  const [translating, setTranslating] = useState(false);
-  const [loadingDescription, setLoadingDescription] = useState(false);
   const [showFullDesc, setShowFullDesc] = useState(false);
-  const [shouldResume, setShouldResume] = useState(true); // Default to true to check for saved position
-  const [isIdle, setIsIdle] = useState(false);
-  const idleTimerRef = useRef(null);
-  const pauseTimerRef = useRef(null);
-
-  // Ref to track last playback position for engagement calculation
-  const lastPositionRef = useRef(0);
-  // Ref to track total watched milliseconds in current session or overall
-  const watchedMillisRef = useRef(0);
-  // Refs to track initialization state
-  const currentVideoIdRef = useRef(null);
-  const hasInitializedFromReduxRef = useRef(false);
-  // Local state to drive UI progress dynamically with ms precision
-  const [localWatchedMillis, setLocalWatchedMillis] = useState(0);
-  const [totalDurationMillis, setTotalDurationMillis] = useState(0);
-
-  const savedProgress = useSelector(state => state.videoProgress.progressByVideo[videoId]);
-
-
-
-  // Set initial watched time from Redux if it exists
-  useEffect(() => {
-    // If videoId changes, reset the tracking refs
-    if (currentVideoIdRef.current !== videoId) {
-      currentVideoIdRef.current = videoId;
-      hasInitializedFromReduxRef.current = false;
-
-      // Default reset for new video
-      watchedMillisRef.current = 0;
-      setLocalWatchedMillis(0);
-      setTotalDurationMillis(0);
-      lastPositionRef.current = 0;
-    }
-
-    // Try to initialize from Redux if we haven't already for this video
-    if (!hasInitializedFromReduxRef.current && savedProgress) {
-      console.log(`[VideoPlayer] Initializing from Redux for ${videoId}: ${savedProgress.watchedSeconds}s`);
-      watchedMillisRef.current = (savedProgress.watchedSeconds || 0) * 1000;
-      setLocalWatchedMillis((savedProgress.watchedSeconds || 0) * 1000);
-      setTotalDurationMillis((savedProgress.totalDuration || 0) * 1000);
-      lastPositionRef.current = savedProgress.lastPosition || 0;
-
-      hasInitializedFromReduxRef.current = true;
-    }
-
-    setShouldResume(true);
-  }, [videoId, savedProgress]);
-
-  const [downloadProgress, setDownloadProgress] = useState(0); // 0 to 1
+  const [isManualOffline, setIsManualOffline] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState(0);
   const [isDownloading, setIsDownloading] = useState(false);
 
-  const [batterySaverOn, setBatterySaverOn] = useState(false);
+  // 1. Meta & Env Hook
+  const { videoData, batterySaverOn, speed, isConnected } = useVideoMetadata(courseId, videoId, quality === "Auto");
 
-  const rawSpeed = useRealtimeSpeed(3000) ?? 0;
-  const speed = batterySaverOn ? 0 : rawSpeed;
-
-
-  useEffect(() => {
-    if (!videoData) return;
-
-    // Only auto-adjust when user selected Auto
-    if (quality !== "Auto") return;
-
-    let newQuality = "360p";
-
-    if (speed < 1) newQuality = "240p";
-    else if (speed < 3) newQuality = "360p";
-    else newQuality = "720p";
-
-    // Only update if actually different to avoid reload storm
-    if (newQuality !== quality) {
-      setQuality(newQuality);
-    }
-
-  }, [speed, videoData]);
-
-
-
-
-
-
-  // ================= VIDEO TRACKING CALCULATION =================
-  const watchedPercentage = totalDurationMillis > 0
-    ? ((localWatchedMillis / totalDurationMillis) * 100).toFixed(1)
-    : 0;
-
-  const isCompleted = Number(watchedPercentage) >= 99; // Using 99% for more reliable completion
-
-  const resetIdleTimer = () => {
-    // If it was blurred, remove blur and play
-    if (isIdle) {
-      setIsIdle(false);
-      videoRef.current?.playAsync();
-    }
-
-    // Clear existing timers
-    if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
-    if (pauseTimerRef.current) clearTimeout(pauseTimerRef.current);
-
-    // Set new timer for 3 minutes (180,000ms) to trigger Blur
-    idleTimerRef.current = setTimeout(() => {
-      handleInactivity();
-    }, 180000);
-  };
-
-  const handleInactivity = () => {
-    setIsIdle(true);
-    console.log("[VideoPlayer] Inactivity detected: Blur activated.");
-
-    // Clear any existing pause timer just in case
-    if (pauseTimerRef.current) clearTimeout(pauseTimerRef.current);
-
-    // Set a secondary timer for 2 minutes (120,000ms) to Pause the video
-    pauseTimerRef.current = setTimeout(() => {
-      console.log("[VideoPlayer] Continuous inactivity: Pausing video.");
-      videoRef.current?.pauseAsync();
-    }, 120000);
-  };
-
-  // Initialize timer on mount
-  useEffect(() => {
-    resetIdleTimer();
-    return () => {
-      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
-      if (pauseTimerRef.current) clearTimeout(pauseTimerRef.current);
-    };
-  }, []);
-
-  useEffect(() => {
-    Battery.getBatteryLevelAsync().then((level) => {
-      const percent = Math.round(level * 100);
-      if (percent <= 20) {
-        setBatterySaverOn(true);
-        setQuality("240p");
-      } else {
-        setBatterySaverOn(false);
-      }
-    });
-
-    const sub = Battery.addBatteryLevelListener(({ batteryLevel }) => {
-      const percent = Math.round(batteryLevel * 100);
-      if (percent <= 20) {
-        setBatterySaverOn(true);
-        setQuality("240p"); // ✅ force 240p
-      } else {
-        setBatterySaverOn(false);
-      }
-    });
-
-    return () => sub.remove();
-  }, []);
-
-  useEffect(() => {
-    if (!courseId || !videoId) return;
-    const apiUrl = `http://10.197.15.102:7777/api/videos/course/${courseId}/${videoId}`;
-    console.log(`Fetching video data from: ${apiUrl}`);
-    fetch(apiUrl)
-      .then((res) => res.json())
-      .then(setVideoData)
-      .catch((err) => console.error("Fetch video data error:", err));
-  }, [courseId, videoId]);
-
-  //   useEffect(() => {
-  //   const fetchDescription = async () => {
-  //     if (!videoData?.descriptionUrl) return;
-  //     try {
-  //       setLoadingDescription(true);
-  //       const response = await fetch(videoData.descriptionUrl);
-  //       const text = await response.text();
-
-  //       setDescriptionText(text);
-  //       setOriginalText(text); // IMPORTANT: store original text
-
-  //     } catch {
-  //       setDescriptionText("Description not available.");
-  //     } finally {
-  //       setLoadingDescription(false);
-  //     }
-  //   };
-  //   fetchDescription();
-  // }, [videoData?.descriptionUrl]);
-
-  // Helper to ensure URLs use the correct backend host (fixes local IP inconsistencies)
-  const normalizeUrl = (url) => {
+  // Helper to ensure URLs use the correct backend host
+  const normalizeUrl = useCallback((url) => {
     if (!url) return url;
     const currentBackendIP = "10.197.15.102:7777";
-    // Replace any local IP (10.x.x.x) with the current one used for API fetches
     return url.replace(/10\.\d+\.\d+\.\d+:\d+/, currentBackendIP);
-  };
+  }, []);
 
-  useEffect(() => {
-    const fetchInitialDescription = async () => {
-      // Note: checking for english inside the new descriptionUrls object
-      if (!videoData?.descriptionUrls?.english) {
-        // Fallback to legacy single URL if present
-        if (videoData?.descriptionUrl) {
-          try {
-            setLoadingDescription(true);
-            const targetUrl = normalizeUrl(videoData.descriptionUrl);
-            console.log(`Fetching legacy description from: ${targetUrl} (Original: ${videoData.descriptionUrl})`);
-            const response = await fetch(targetUrl);
-            const text = await response.text();
-            setDescriptionText(text);
-            setOriginalText(text);
-          } catch (error) {
-            console.error("Error fetching legacy description:", error);
-          } finally {
-            setLoadingDescription(false);
-          }
-        }
-        return;
-      }
+  // 2. Inactivity Hook
+  const { isIdle, resetIdleTimer } = useVideoInactivity(videoRef);
 
-      try {
-        setLoadingDescription(true);
-        const targetUrl = normalizeUrl(videoData.descriptionUrls.english);
-        console.log(`Fetching description from: ${targetUrl} (Original: ${videoData.descriptionUrls.english})`);
+  // 3. Translation Hook
+  const {
+    descriptionText,
+    selectedLanguage,
+    setSelectedLanguage,
+    translating,
+    loadingDescription,
+    isOfflineCache,
+    translateDescription
+  } = useVideoTranslation(videoId, videoData, isConnected, isManualOffline, normalizeUrl);
 
-        const response = await fetch(targetUrl);
-        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+  // 4. Progress Hook
+  const {
+    localWatchedMillis,
+    totalDurationMillis,
+    watchedPercentage,
+    onPlaybackStatusUpdate,
+    onLoad
+  } = useVideoProgress(videoId, videoRef);
 
-        const text = await response.text();
-        setDescriptionText(text);
-        setOriginalText(text); // Keep English as the reference
-        setSelectedLanguage("en"); // Reset picker to English on video change
-      } catch (error) {
-        console.error("Error fetching description:", error);
-        setDescriptionText("Description not available.");
-      } finally {
-        setLoadingDescription(false);
-      }
-    };
-
-    fetchInitialDescription();
-  }, [videoData?.descriptionUrls?.english, videoData?.descriptionUrl]);
-
-  const renderFormattedText = (text) => {
-    if (!text) return null;
-    const parts = text.split(/(\*[^*]+\*)/g);
-    return parts.map((part, index) =>
-      part.startsWith("*") && part.endsWith("*") ? (
-        <Text key={index} style={styles.boldHighlight}>{part.slice(1, -1)}</Text>
-      ) : (
-        <Text key={index} style={styles.normalText}>{part}</Text>
-      )
-    );
-  };
+  // --- Core Utility Functions ---
 
   const currentUri = useMemo(() => {
     if (!videoData) return null;
-
     const res = videoData.resolutions || {};
-    let url = videoData.url;
 
+    let activeQuality = quality;
     if (quality === "Auto") {
-      // Auto will use last decided quality, NOT speed directly
-      url = res.p360 || videoData.url;
-    } else {
-      url = res[quality] || videoData.url;
+      if (speed < 1) activeQuality = "240p";
+      else if (speed < 3) activeQuality = "360p";
+      else activeQuality = "720p";
     }
 
+    let url = res[activeQuality] || videoData.url;
     return normalizeUrl(url);
-
-  }, [quality, videoData]); // 🚀 REMOVE speed
+  }, [quality, speed, videoData, normalizeUrl]);
 
   const sourceUri = localUri || currentUri;
 
-  useEffect(() => {
-    if (sourceUri) {
-      setShouldResume(true);
+  const handleDownloadAction = async () => {
+    if (isDownloading || !videoData) return;
+    try {
+      setIsDownloading(true);
+      setDownloadProgress(0);
+
+      const filename = videoData.title.replace(/[^a-z0-9]/gi, "_").toLowerCase();
+      const resumable = createDownloadResumable(videoData.url, filename, (p) => setDownloadProgress(p));
+
+      const result = await resumable.downloadAsync();
+      if (result?.uri) {
+        const finalUri = await encryptFile(result.uri, filename);
+        if (finalUri) {
+          if (videoData.descriptionUrls) await downloadMetadata(videoId, videoData.descriptionUrls);
+          dispatch(addDownload({
+            id: videoId,
+            courseId,
+            title: videoData.title,
+            localUri: finalUri,
+            thumbnail: videoData.thumbnail || "https://via.placeholder.com/150",
+            timestamp: new Date().toISOString(),
+          }));
+          Alert.alert("Success", "Video and translations downloaded for offline use!");
+        }
+      }
+    } catch (error) {
+      console.error("[VideoPlayer] Download Error:", error);
+      Alert.alert("Error", "Download failed.");
+    } finally {
+      setIsDownloading(false);
     }
-  }, [videoId]);
+  };
 
   const shareVideo = async () => {
     try {
-      if (!localUri) {
-        Alert.alert("Download required", "Please download the video first");
-        return;
-      }
-      if (!(await Sharing.isAvailableAsync())) {
-        Alert.alert("Not supported", "Sharing not supported on this device");
-        return;
-      }
-      await Sharing.shareAsync(localUri, {
-        mimeType: "video/mp4",
-        dialogTitle: "Share video",
-      });
-    } catch (e) {
-      Alert.alert("Error", "Failed to share video");
-    }
+      if (!localUri) return Alert.alert("Download required", "Please download the video first");
+      if (!(await Sharing.isAvailableAsync())) return Alert.alert("Not supported", "Sharing not supported");
+      await Sharing.shareAsync(localUri, { mimeType: "video/mp4", dialogTitle: "Share video" });
+    } catch (e) { Alert.alert("Error", "Failed to share video"); }
   };
 
   const downloadAttachment = async (url, fileName) => {
@@ -347,9 +153,7 @@ const VideoPlayer = () => {
       if (result.status === 200 && (await Sharing.isAvailableAsync())) {
         await Sharing.shareAsync(result.uri);
       }
-    } catch (error) {
-      Alert.alert("Download Error", "Could not complete download.");
-    }
+    } catch { Alert.alert("Download Error", "Could not complete download."); }
   };
 
   const openAttachment = async (url) => {
@@ -357,174 +161,21 @@ const VideoPlayer = () => {
     supported ? Linking.openURL(url) : Alert.alert("Cannot open file");
   };
 
-  const translateDescription = async (targetLang) => {
-    if (!videoData?.descriptionUrls) {
-      // Legacy API-based translation fallback if descriptionUrls is missing
-      if (!originalText) return;
-
-      const languageMap = {
-        en: "English",
-        hi: "Hindi",
-        mr: "Marathi",
-        te: "Telugu",
-        ta: "Tamil",
-      };
-
-      if (targetLang === "en") {
-        setDescriptionText(originalText);
-        return;
-      }
-
-      try {
-        setTranslating(true);
-        const response = await fetch(
-          "http://10.197.15.102:7777/api/translate/translate",
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              text: originalText,
-              target: languageMap[targetLang],
-            }),
-          }
-        );
-        const data = await response.json();
-        if (data.translatedText) {
-          setDescriptionText(data.translatedText);
-        } else {
-          Alert.alert("Translation failed");
-        }
-      } catch (error) {
-        console.log("Translation Error:", error);
-        Alert.alert("Translation Failed");
-      } finally {
-        setTranslating(false);
-      }
-      return;
-    }
-
-    // Map the picker values (en, hi, etc.) to your JSON keys (english, hindi, etc.)
-    const languageMap = {
-      en: "english",
-      hi: "hindi",
-      mr: "marathi",
-      te: "telugu",
-      ta: "tamil",
-    };
-
-    const targetKey = languageMap[targetLang];
-    const targetUrl = videoData.descriptionUrls[targetKey];
-
-    if (!targetUrl) {
-      Alert.alert("Error", "Translation file not found for this language.");
-      return;
-    }
-
-    try {
-      setTranslating(true);
-
-      // Fetch the text file directly from the URL (ImageKit)
-      const normalizedTargetUrl = normalizeUrl(targetUrl);
-      console.log(`Fetching translation from: ${normalizedTargetUrl} (Original: ${targetUrl})`);
-
-      const response = await fetch(normalizedTargetUrl);
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-
-      const text = await response.text();
-
-      if (text) {
-        setDescriptionText(text);
-      } else {
-        Alert.alert("Error", "Translation file is empty.");
-      }
-    } catch (error) {
-      console.error("Fetch Error:", error);
-      Alert.alert("Failed", "Could not load the translated description.");
-    } finally {
-      setTranslating(false);
-    }
-  };
-
-
-  const handleSpeakDescription = () => {
-    console.log("Speaking text:", descriptionText);
-
-    if (selectedLanguage !== "en") {
-      Alert.alert("Text to Speech available only in English");
-      return;
-    }
-
-    if (!descriptionText || descriptionText.trim().length === 0) {
-      Alert.alert("No text available to speak");
-      return;
-    }
-
-    speakEnglishText(descriptionText);
-  };
-
   if (!videoData || !sourceUri) {
     return (
       <View style={styles.loadingContainer}>
-        <View style={styles.loadingContent}>
-          <ActivityIndicator size="large" color="#bb86fc" />
-          <Text style={styles.loadingText}>Loading video...</Text>
-        </View>
+        <ActivityIndicator size="large" color="#bb86fc" />
+        <Text style={styles.loadingText}>Loading video...</Text>
       </View>
     );
   }
 
-  const handleDownloadAction = async () => {
-    if (isDownloading) return;
-
-    try {
-      setIsDownloading(true);
-      setDownloadProgress(0);
-
-      const filename = videoData.title.replace(/[^a-z0-9]/gi, "_").toLowerCase();
-      const resumable = createDownloadResumable(
-        videoData.url,
-        filename,
-        (progress) => setDownloadProgress(progress)
-      );
-
-      const result = await resumable.downloadAsync();
-
-      if (result && result.uri) {
-        // Move to dedicated folder and encrypt
-        const finalUri = await encryptFile(result.uri, filename);
-
-        if (finalUri) {
-          dispatch(addDownload({
-            id: videoId,
-            courseId: courseId,
-            title: videoData.title,
-            localUri: finalUri, // This will now be .../CourseDownloads/filename.dat
-            thumbnail: videoData.thumbnail || "https://via.placeholder.com/150",
-            timestamp: new Date().toISOString(),
-          }));
-          Alert.alert("Success", "Video downloaded to secure folder!");
-        }
-      }
-    } catch (error) {
-      console.error("Download Error:", error);
-      Alert.alert("Error", "Download failed.");
-    } finally {
-      setIsDownloading(false);
-    }
-  };
-
   return (
     <View style={styles.container} onTouchStart={resetIdleTimer}>
-      <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Video Player */}
-        <View style={[styles.videoWrapper, batterySaverOn && styles.batterySaverVideo]}>
+      <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
 
+        {/* Video Player Section */}
+        <View style={[styles.videoWrapper, batterySaverOn && styles.batterySaverVideo]}>
           <Video
             ref={videoRef}
             source={{ uri: sourceUri }}
@@ -533,86 +184,9 @@ const VideoPlayer = () => {
             resizeMode="contain"
             shouldPlay={isFocused}
             progressUpdateIntervalMillis={100}
-
-            onPlaybackStatusUpdate={(status) => {
-              if (!status.isLoaded) return;
-
-              if (status.durationMillis) {
-                setTotalDurationMillis(status.durationMillis);
-              }
-
-              let diff = status.positionMillis - lastPositionRef.current;
-
-              // Ignore backward seek
-              if (diff < 0) {
-                lastPositionRef.current = status.positionMillis;
-                return;
-              }
-
-              // Ignore large jumps (reload / manual seek)
-              if (diff > 3000) {
-                lastPositionRef.current = status.positionMillis;
-                return;
-              }
-
-              if (status.isPlaying) {
-                watchedMillisRef.current += diff;
-                setLocalWatchedMillis(watchedMillisRef.current);
-
-                const currentSeconds = Math.floor(watchedMillisRef.current / 1000);
-                const durationSeconds = Math.floor(status.durationMillis / 1000);
-                const lastSavedSeconds = savedProgress?.watchedSeconds || 0;
-
-                if (currentSeconds > lastSavedSeconds + 3) {
-                  dispatch(updateVideoProgress({
-                    videoId,
-                    watchedSeconds: currentSeconds,
-                    totalDuration: durationSeconds,
-                    lastPosition: status.positionMillis
-                  }));
-                }
-              }
-
-              if (status.didJustFinish) {
-                const durationSeconds = Math.floor(status.durationMillis / 1000);
-
-                watchedMillisRef.current = status.durationMillis;
-                setLocalWatchedMillis(status.durationMillis);
-
-                dispatch(updateVideoProgress({
-                  videoId,
-                  watchedSeconds: durationSeconds,
-                  totalDuration: durationSeconds,
-                  lastPosition: status.durationMillis
-                }));
-              }
-
-              lastPositionRef.current = status.positionMillis;
-            }}
-
-            onLoad={() => {
-              const targetPos = savedProgress?.lastPosition || 0;
-
-              if (shouldResume && targetPos > 0) {
-                videoRef.current?.setPositionAsync(targetPos);
-              }
-
-              if (isFocused) {
-                videoRef.current?.playAsync();
-              }
-
-              setShouldResume(false);
-            }}
+            onPlaybackStatusUpdate={onPlaybackStatusUpdate}
+            onLoad={onLoad}
           />
-
-
-
-
-
-
-
-
-
           {isIdle && (
             <BlurView intensity={80} tint="dark" style={StyleSheet.absoluteFill}>
               <View style={styles.idleOverlay}>
@@ -629,807 +203,121 @@ const VideoPlayer = () => {
             <View style={styles.titleAccent} />
             <Text style={styles.videoTitle}>{videoData.title || "Video Lesson"}</Text>
           </View>
-
           <View style={styles.trackingContainer}>
-            <Text style={[
-              styles.trackingText,
-              { color: isCompleted ? "#4ade80" : "#bb86fc" }
-            ]}>
+            <Text style={[styles.trackingText, { color: Number(watchedPercentage) >= 99 ? "#4ade80" : "#bb86fc" }]}>
               {watchedPercentage}%
             </Text>
-            <Text style={[
-              styles.incompleteText,
-              isCompleted && { color: '#4ade80' }
-            ]}>
-              {isCompleted ? "Completed" : "In Progress"}
+            <Text style={[styles.incompleteText, Number(watchedPercentage) >= 99 && { color: '#4ade80' }]}>
+              {Number(watchedPercentage) >= 99 ? "Completed" : "In Progress"}
             </Text>
           </View>
         </View>
 
-        {/* Learning Progress Card */}
-        <View style={styles.sectionCard}>
-          <View style={styles.sectionHeader}>
-            <Ionicons name="analytics-outline" size={18} color="#bb86fc" />
-            <Text style={styles.sectionTitle}>LEARNING PROGRESS</Text>
-          </View>
+        {/* Modular Components */}
+        <VideoProgressCard
+          watchedPercentage={watchedPercentage}
+          localWatchedMillis={localWatchedMillis}
+          totalDurationMillis={totalDurationMillis}
+        />
 
-          <View style={styles.progressContainer}>
-            <View style={styles.learningProgressBarBg}>
-              <View
-                style={[
-                  styles.learningProgressBarFill,
-                  {
-                    width: `${watchedPercentage}%`
-                  }
-                ]}
-              />
-            </View>
-            <View style={styles.progressInfo}>
-              <Text style={styles.progressText}>
-                {Math.round(watchedPercentage)}% Completed
-              </Text>
-              <Text style={styles.progressText}>
-                {Math.floor(localWatchedMillis / 1000)}s / {Math.floor(totalDurationMillis / 1000)}s
-              </Text>
-            </View>
-          </View>
+        <VideoActionRow
+          isDownloading={isDownloading}
+          downloadProgress={downloadProgress}
+          onDownload={handleDownloadAction}
+          localUri={localUri}
+          onShare={shareVideo}
+        />
 
-          {isCompleted && (
-            <View style={styles.completedBadge}>
-              <Ionicons name="checkmark-circle" size={16} color="#4ade80" />
-              <Text style={styles.completedText}>Lesson Completed</Text>
-            </View>
-          )}
-        </View>
+        <VideoQualitySelector
+          quality={quality}
+          setQuality={setQuality}
+          speed={speed}
+          batterySaverOn={batterySaverOn}
+        />
 
-        {/* Action Buttons */}
-        <View style={styles.actionRow}>
-          <TouchableOpacity
-            style={[styles.actionBtn, isDownloading && styles.disabledBtn]}
-            onPress={handleDownloadAction}
-            disabled={isDownloading}
-          >
-            <View style={[styles.actionContent, styles.downloadBtn]}>
-              {isDownloading ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <Ionicons name="download-outline" size={22} color="#fff" />
-              )}
-              <Text style={styles.actionText}>
-                {isDownloading ? `${Math.round(downloadProgress * 100)}%` : "Download"}
-              </Text>
-            </View>
+        <VideoDescriptionSection
+          selectedLanguage={selectedLanguage}
+          setSelectedLanguage={setSelectedLanguage}
+          descriptionText={descriptionText}
+          translating={translating}
+          loadingDescription={loadingDescription}
+          isOfflineCache={isOfflineCache}
+          isManualOffline={isManualOffline}
+          setIsManualOffline={setIsManualOffline}
+          onTranslate={translateDescription}
+          onSpeak={() => speakEnglishText(descriptionText)}
+          onShowFullDesc={() => setShowFullDesc(true)}
+        />
 
-            {/* Progress Bar Background */}
-            {isDownloading && (
-              <View style={styles.progressBarContainer}>
-                <View style={[styles.progressBarFill, { width: `${downloadProgress * 100}%` }]} />
-              </View>
-            )}
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.actionBtn, !localUri && styles.disabledBtn]}
-            onPress={shareVideo}
-            disabled={!localUri || isDownloading}
-          >
-            <View style={[styles.actionContent, !localUri ? styles.disabledShareBtn : styles.shareBtn]}>
-              <Ionicons name="share-social-outline" size={22} color="#fff" />
-              <Text style={styles.actionText}>Share</Text>
-            </View>
-          </TouchableOpacity>
-        </View>
-
-        {/* Video Quality Selector */}
-        <View style={styles.sectionCard}>
-          <View style={styles.sectionHeader}>
-            <Ionicons name="settings-outline" size={18} color="#bb86fc" />
-            <Text style={styles.sectionTitle}>VIDEO QUALITY</Text>
-          </View>
-
-          <View style={styles.qualityContainer}>
-            {["Auto", "240p", "360p", "720p"].map((q) => (
-              <TouchableOpacity
-                key={q}
-                style={[
-                  styles.qualityOption,
-                  quality === q && styles.activeQuality,
-                  batterySaverOn && styles.disabledQuality,
-                ]}
-                onPress={() => setQuality(q)}
-                disabled={batterySaverOn}
-              >
-                {quality === q && (
-                  <View style={styles.qualityIndicator}>
-                    <Ionicons name="checkmark" size={10} color="#fff" />
-                  </View>
-                )}
-                <Text style={[
-                  styles.qualityText,
-                  quality === q && styles.activeQualityText
-                ]}>
-                  {q}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-
-          {/* Speed Information */}
-          <View style={styles.speedContainer}>
-            <View style={styles.speedIconContainer}>
-              <Ionicons name="speedometer-outline" size={20} color="#bb86fc" />
-            </View>
-            <View style={styles.speedInfo}>
-              <Text style={styles.speedLabel}>Network Speed</Text>
-              <Text style={styles.speedValue}>{Math.round(speed * 100)} kbps</Text>
-            </View>
-          </View>
-        </View>
-
-        {/* Description and Translation Section */}
-        <View style={styles.sectionCard}>
-          <View style={styles.sectionHeader}>
-            <Ionicons name="language-outline" size={18} color="#bb86fc" />
-            <Text style={styles.sectionTitle}>DESCRIPTION & TRANSLATION</Text>
-          </View>
-
-          {/* Simplified Language Picker as a Display Card */}
-          <TouchableOpacity
-            style={styles.languageDisplayCard}
-            onPress={() => { }} // Logic handled by Picker below if needed
-          >
-            <Text style={styles.selectedLanguageText}>
-              {selectedLanguage === "en" ? "English" :
-                selectedLanguage === "hi" ? "Hindi" :
-                  selectedLanguage === "mr" ? "Marathi" :
-                    selectedLanguage === "te" ? "Telugu" : "Tamil"}
-            </Text>
-
-            <View style={styles.pickerOverlayContainer}>
-              <Picker
-                selectedValue={selectedLanguage}
-                onValueChange={(itemValue) => {
-                  setSelectedLanguage(itemValue);
-                  translateDescription(itemValue);
-                }}
-                dropdownIconColor="#bb86fc"
-                style={styles.hiddenPicker}
-              >
-                <Picker.Item label="English" value="en" />
-                <Picker.Item label="Hindi" value="hi" />
-                <Picker.Item label="Marathi" value="mr" />
-                <Picker.Item label="Telugu" value="te" />
-                <Picker.Item label="Tamil" value="ta" />
-              </Picker>
-            </View>
-          </TouchableOpacity>
-
-          <View style={styles.descriptionContainer}>
-            {loadingDescription || translating ? (
-              <ActivityIndicator size="small" color="#bb86fc" />
-            ) : (
-              <>
-                <Text numberOfLines={5} style={styles.descriptionText}>
-                  {descriptionText}
-                </Text>
-                {descriptionText.length > 200 && (
-                  <TouchableOpacity onPress={() => setShowFullDesc(true)} style={styles.readMoreBtn}>
-                    <Text style={styles.readMoreText}>Read More</Text>
-                    <Ionicons name="arrow-forward" size={16} color="#bb86fc" />
-                  </TouchableOpacity>
-                )}
-              </>
-            )}
-          </View>
-        </View>
-
-        {/* Attachments Section */}
-        {Array.isArray(videoData.attachments) && videoData.attachments.length > 0 && (
-          <View style={styles.sectionCard}>
-            <View style={styles.sectionHeader}>
-              <Ionicons name="attach-outline" size={18} color="#bb86fc" />
-              <Text style={styles.sectionTitle}>ATTACHMENTS</Text>
-            </View>
-
-            {videoData.attachments.map((f, index) => (
-              <View key={f._id} style={[
-                styles.attachmentItem,
-                index < videoData.attachments.length - 1 && styles.attachmentBorder
-              ]}>
-                <View style={styles.attachmentIcon}>
-                  <Ionicons
-                    name={f.fileType === 'pdf' ? 'document-pdf' : 'document'}
-                    size={24}
-                    color="#bb86fc"
-                  />
-                </View>
-
-                <TouchableOpacity
-                  style={styles.attachmentContent}
-                  onPress={() => openAttachment(f.downloadUrl)}
-                >
-                  <Text style={styles.attachmentName} numberOfLines={1}>
-                    {f.fileName}
-                  </Text>
-                  <Text style={styles.attachmentMeta}>
-                    {f.fileType.toUpperCase()} • {f.size.toFixed(2)} MB
-                  </Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.attachmentDownload}
-                  onPress={() => downloadAttachment(f.downloadUrl, f.fileName)}
-                >
-                  <Ionicons name="download" size={20} color="#bb86fc" />
-                </TouchableOpacity>
-              </View>
-            ))}
-          </View>
-        )}
+        <VideoAttachmentsList
+          attachments={videoData.attachments}
+          onOpen={openAttachment}
+          onDownload={downloadAttachment}
+        />
 
         {/* Quiz Button */}
         {videoData.quiz?.length > 0 && (
-          <TouchableOpacity
-            style={styles.quizBtn}
-            onPress={() => navigation.navigate("QuizScreen", { quiz: videoData.quiz })}
-          >
+          <TouchableOpacity style={styles.quizBtn} onPress={() => navigation.navigate("QuizScreen", { quiz: videoData.quiz })}>
             <View style={styles.quizContent}>
               <Ionicons name="help-circle-outline" size={24} color="#fff" />
               <View style={styles.quizTextContainer}>
                 <Text style={styles.quizBtnText}>Start Quiz</Text>
                 <Text style={styles.quizSubText}>Test your knowledge</Text>
               </View>
-              <View style={styles.quizArrow}>
-                <Ionicons name="arrow-forward" size={20} color="#fff" />
-              </View>
+              <Ionicons name="arrow-forward" size={20} color="#fff" />
             </View>
           </TouchableOpacity>
         )}
-
-        {/* Full Description Modal */}
-        <Modal
-          visible={showFullDesc}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setShowFullDesc(false)}
-        >
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalContainer}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Full Description</Text>
-
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-                  {selectedLanguage === "en" && (
-                    <TouchableOpacity onPress={handleSpeakDescription}>
-                      <Ionicons name="volume-high-outline" size={22} color="#bb86fc" />
-                    </TouchableOpacity>
-                  )}
-
-                  <TouchableOpacity
-                    onPress={() => {
-                      stopSpeech();
-                      setShowFullDesc(false);
-                    }}
-                    style={styles.modalCloseBtn}
-                  >
-                    <Ionicons name="close" size={24} color="#fff" />
-                  </TouchableOpacity>
-                </View>
-              </View>
-
-              <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
-                {renderFormattedText(descriptionText)}
-              </ScrollView>
-            </View>
-          </View>
-        </Modal>
-
       </ScrollView>
-      {isIdle && (
-        <BlurView
-          intensity={60}
-          tint="dark"
-          style={[StyleSheet.absoluteFill, { zIndex: 999 }]}
-        />
-      )}
+
+      {/* Full Description Modal */}
+      <Modal visible={showFullDesc} transparent animationType="fade" onRequestClose={() => setShowFullDesc(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Full Description</Text>
+              <TouchableOpacity onPress={() => { stopSpeech(); setShowFullDesc(false); }}>
+                <Ionicons name="close" size={24} color="#fff" />
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
+              <Text style={styles.normalText}>{renderFormattedText(descriptionText)}</Text>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#0a0a0a',
-  },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingBottom: 30,
-    paddingTop: 32,
-  },
-  loadingContainer: {
-    flex: 1,
-    backgroundColor: '#0a0a0a',
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  loadingContent: {
-    alignItems: "center",
-  },
-  loadingText: {
-    color: "#bb86fc",
-    marginTop: 12,
-    fontSize: 16,
-    fontWeight: "500",
-  },
-  videoWrapper: {
-    width: "100%",
-    paddingHorizontal: 10,
-    aspectRatio: 16 / 9,
-    backgroundColor: "#000",
-    position: "relative",
-  },
-  batterySaverVideo: {
-    opacity: 0.7,
-  },
-  batterySaverOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(10, 10, 10, 0.8)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  batterySaverText: {
-    color: '#fff',
-    marginTop: 8,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  video: {
-    width: "100%",
-    height: "100%",
-  },
-  titleSection: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 20,
-    backgroundColor: '#121212',
-    marginTop: 2,
-    borderBottomWidth: 1,
-    borderBottomColor: '#2a2a2a',
-  },
-  titleAccent: {
-    width: 4,
-    height: 24,
-    backgroundColor: '#bb86fc',
-    borderRadius: 2,
-    marginRight: 12,
-  },
-  videoTitle: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '700',
-    flex: 1,
-    letterSpacing: 0.5,
-  },
-  actionRow: {
-    flexDirection: "row",
-    gap: 12,
-    paddingHorizontal: 16,
-    marginBottom: 20,
-    marginTop: 16,
-  },
-  actionBtn: {
-    flex: 1,
-    borderRadius: 12,
-    overflow: 'hidden',
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-  },
-  actionContent: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 14,
-    gap: 8,
-  },
-  downloadBtn: {
-    backgroundColor: '#7c3aed',
-  },
-  shareBtn: {
-    backgroundColor: '#9d4edd',
-  },
-  disabledShareBtn: {
-    backgroundColor: '#333333',
-  },
-  disabledBtn: {
-    opacity: 0.5,
-  },
-  actionText: {
-    color: "#fff",
-    fontWeight: "700",
-    fontSize: 15,
-  },
-  sectionCard: {
-    backgroundColor: '#1a1a1a',
-    borderRadius: 16,
-    marginHorizontal: 16,
-    marginBottom: 16,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#2a2a2a',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4.65,
-    elevation: 8,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 16,
-  },
-  sectionTitle: {
-    color: "#bb86fc",
-    fontSize: 13,
-    fontWeight: "700",
-    letterSpacing: 1,
-  },
-  qualityContainer: {
-    flexDirection: 'row',
-    backgroundColor: '#0a0a0a',
-    borderRadius: 12,
-    padding: 4,
-    marginBottom: 16,
-  },
-  qualityOption: {
-    flex: 1,
-    paddingVertical: 10,
-    alignItems: 'center',
-    borderRadius: 10,
-    position: 'relative',
-  },
-  activeQuality: {
-    backgroundColor: '#bb86fc',
-    shadowColor: '#bb86fc',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.5,
-    shadowRadius: 4,
-    elevation: 5,
-  },
-  disabledQuality: {
-    opacity: 0.4,
-  },
-  qualityIndicator: {
-    position: 'absolute',
-    top: -4,
-    right: -4,
-    backgroundColor: '#9d4edd',
-    borderRadius: 10,
-    width: 18,
-    height: 18,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#1a1a1a',
-  },
-  progressContainer: {
-    marginTop: 8,
-  },
-  learningProgressBarBg: {
-    height: 8,
-    backgroundColor: '#0a0a0a',
-    borderRadius: 4,
-    overflow: 'hidden',
-    marginBottom: 8,
-  },
-  learningProgressBarFill: {
-    height: '100%',
-    backgroundColor: '#bb86fc',
-    borderRadius: 4,
-  },
-  progressInfo: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  progressText: {
-    color: '#888',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  completedBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 12,
-    backgroundColor: 'rgba(74, 222, 128, 0.1)',
-    padding: 8,
-    borderRadius: 8,
-    alignSelf: 'flex-start',
-  },
-  completedText: {
-    color: '#4ade80',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  qualityText: {
-    color: '#888',
-    fontWeight: '600',
-    fontSize: 14,
-  },
-  activeQualityText: {
-    color: '#fff',
-    fontWeight: '700',
-  },
-  speedContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#0a0a0a',
-    borderRadius: 12,
-    padding: 12,
-  },
-  speedIconContainer: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#2a2a2a',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  speedInfo: {
-    flex: 1,
-  },
-  speedLabel: {
-    color: '#888',
-    fontSize: 12,
-    marginBottom: 2,
-  },
-  speedValue: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  descriptionContainer: {
-    backgroundColor: '#0a0a0a',
-    borderRadius: 12,
-    padding: 12,
-  },
-  descriptionText: {
-    color: "#e0e0e0",
-    fontSize: 14,
-    lineHeight: 22,
-  },
-  readMoreBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    marginTop: 8,
-    gap: 4,
-  },
-  readMoreText: {
-    color: '#bb86fc',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  attachmentItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-  },
-  attachmentBorder: {
-    borderBottomWidth: 1,
-    borderBottomColor: '#2a2a2a',
-  },
-  attachmentIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#2a2a2a',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  attachmentContent: {
-    flex: 1,
-    marginRight: 12,
-  },
-  attachmentName: {
-    color: "#ffffff",
-    fontWeight: "600",
-    fontSize: 14,
-    marginBottom: 2,
-  },
-  attachmentMeta: {
-    color: "#888",
-    fontSize: 12,
-  },
-  attachmentDownload: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#2a2a2a',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  quizBtn: {
-    marginHorizontal: 16,
-    marginTop: 8,
-    marginBottom: 20,
-    borderRadius: 16,
-    overflow: 'hidden',
-    backgroundColor: '#7c3aed',
-    elevation: 5,
-    shadowColor: '#7c3aed',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4.65,
-  },
-  quizContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 16,
-  },
-  quizTextContainer: {
-    flex: 1,
-    marginLeft: 12,
-  },
-  quizBtnText: {
-    color: "#fff",
-    fontWeight: "bold",
-    fontSize: 16,
-  },
-  quizSubText: {
-    color: "rgba(255,255,255,0.7)",
-    fontSize: 12,
-    marginTop: 2,
-  },
-  quizArrow: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  modalOverlay: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.8)',
-  },
-  modalContainer: {
-    width: '90%',
-    maxHeight: '70%',
-    backgroundColor: '#1a1a1a',
-    borderRadius: 20,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: '#2a2a2a',
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#2a2a2a',
-    backgroundColor: '#121212',
-  },
-  modalTitle: {
-    color: '#bb86fc',
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  modalCloseBtn: {
-    padding: 4,
-  },
-  modalContent: {
-    padding: 16,
-    maxHeight: 400,
-  },
-  normalText: {
-    color: "#e0e0e0",
-    fontSize: 14,
-    lineHeight: 22,
-  },
-  boldHighlight: {
-    color: "#fff",
-    fontWeight: "bold",
-    fontSize: 14,
-    lineHeight: 22,
-  },
-  progressBarContainer: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 4,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-  },
-  progressBarFill: {
-    height: '100%',
-    backgroundColor: '#fff', // White bar on top of the purple button
-  },
-  disabledBtn: {
-    opacity: 0.8, // Less transparent so the progress is visible
-  },
-  idleOverlay: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  idleText: {
-    color: 'white',
-    marginTop: 10,
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  languagePickerWrapper: {
-    backgroundColor: "#0a0a0a",
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#2a2a2a",
-    marginBottom: 15,
-    overflow: "hidden",
-  },
-
-  languagePicker: {
-    color: "#ffffff",
-    height: 50,
-  },
-
-  languagePickerItem: {
-    color: "#ffffff",
-  },
-  languageDisplayCard: {
-    backgroundColor: "#0a0a0a",
-    borderRadius: 15,
-    borderWidth: 1,
-    borderColor: "#2a2a2a",
-    paddingHorizontal: 16,
-    paddingVertical: 18,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-    position: 'relative',
-  },
-  selectedLanguageText: {
-    color: "#ffffff",
-    fontSize: 16, // Matches the large text in your image
-    fontWeight: "400",
-  },
-  pickerOverlayContainer: {
-    position: 'absolute',
-    right: 10,
-    top: 0,
-    bottom: 0,
-    width: 50, // Only covers the arrow area
-    justifyContent: 'center',
-  },
-  hiddenPicker: {
-    width: '100%',
-    color: 'transparent', // Keeps only the arrow visible on Android
-    opacity: 1,
-  },
-  // Ensure descriptionContainer is updated for better spacing
-  descriptionContainer: {
-    backgroundColor: '#0a0a0a',
-    borderRadius: 12,
-    padding: 15,
-    minHeight: 100, // Provides a clean empty state like your image
-  },
+  container: { flex: 1, backgroundColor: '#0a0a0a' },
+  scrollView: { flex: 1 },
+  scrollContent: { paddingBottom: 30, paddingTop: 32 },
+  loadingContainer: { flex: 1, backgroundColor: '#0a0a0a', justifyContent: "center", alignItems: "center" },
+  loadingText: { color: "#bb86fc", marginTop: 10 },
+  videoWrapper: { width: "100%", aspectRatio: 16 / 9, backgroundColor: "#000", position: 'relative' },
+  video: { width: "100%", height: "100%" },
+  batterySaverVideo: { opacity: 0.7 },
+  idleOverlay: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  idleText: { color: 'white', marginTop: 10, fontSize: 16, fontWeight: '600' },
+  titleSection: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 18, backgroundColor: '#000', marginBottom: 16 },
+  titleAccent: { width: 4, height: 24, backgroundColor: '#bb86fc', borderRadius: 2, marginRight: 12 },
+  videoTitle: { color: '#fff', fontSize: 18, fontWeight: 'bold', flex: 1 },
+  trackingContainer: { alignItems: 'flex-end' },
+  trackingText: { fontSize: 16, fontWeight: '800' },
+  incompleteText: { color: '#888', fontSize: 10, fontWeight: '600', textTransform: 'uppercase', marginTop: 2 },
+  quizBtn: { backgroundColor: '#7c3aed', marginHorizontal: 16, borderRadius: 20, padding: 20 },
+  quizContent: { flexDirection: 'row', alignItems: 'center', gap: 15 },
+  quizTextContainer: { flex: 1 },
+  quizBtnText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
+  quizSubText: { color: 'rgba(255,255,255,0.7)', fontSize: 12 },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center' },
+  modalContainer: { width: '90%', maxHeight: '80%', backgroundColor: '#111', borderRadius: 25, overflow: 'hidden', borderWidth: 1, borderColor: '#333' },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, borderBottomWidth: 1, borderBottomColor: '#222' },
+  modalTitle: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
+  modalContent: { padding: 20 },
+  normalText: { color: '#e0e0e0', fontSize: 15, lineHeight: 24 },
 });
 
-export default VideoPlayer; 
+export default VideoPlayer;

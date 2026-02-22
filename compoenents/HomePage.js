@@ -14,6 +14,7 @@ import { BookOpen, Clock, Users, PlayCircle, Zap } from "lucide-react-native";
 import * as Battery from "expo-battery";
 import { useSelector } from "react-redux"; // ✅ Add this
 import { DownloadCloud, ChevronRight } from "lucide-react-native";
+import NetInfo from "@react-native-community/netinfo";
 
 const HomePage = () => {
   const navigation = useNavigation();
@@ -21,6 +22,7 @@ const HomePage = () => {
   const [courses, setCourses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [isConnected, setIsConnected] = useState(true);
 
   const downloadedVideos = useSelector((state) => state.downloads.videos);
 
@@ -68,8 +70,11 @@ const HomePage = () => {
     };
   }, []);
 
-  /* ================= FETCH COURSES ================= */
-  useEffect(() => {
+  /* ================= FETCH COURSES & NETWORK ================= */
+  const fetchCourses = () => {
+    if (!isConnected) return;
+    setLoading(true);
+    setError(null);
     fetch("http://10.197.15.102:7777/api/courses")
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
@@ -86,56 +91,23 @@ const HomePage = () => {
         setError(err.message);
         setLoading(false);
       });
+  };
+
+  useEffect(() => {
+    const unsubscribe = NetInfo.addEventListener(state => {
+      setIsConnected(state.isConnected !== false);
+      if (state.isConnected === false) {
+        setLoading(false);
+      }
+    });
+    return () => unsubscribe();
   }, []);
 
-  /* 🔄 LOADING */
-  if (loading) {
-    return (
-      <View style={styles.center}>
-        <View style={styles.loadingContent}>
-          <ActivityIndicator size="large" color="#bb86fc" />
-          <Text style={styles.loadingText}>Loading courses...</Text>
-        </View>
-      </View>
-    );
-  }
-
-  /* ❌ ERROR */
-  if (error) {
-    return (
-      <View style={styles.center}>
-        <View style={styles.errorCard}>
-          <Zap size={48} color="#bb86fc" />
-          <Text style={styles.errorText}>Error: {error}</Text>
-          <Text style={styles.errorHint}>
-            Make sure backend is running on port 7777
-          </Text>
-          <TouchableOpacity
-            style={styles.retryBtn}
-            onPress={() => {
-              setLoading(true);
-              setError(null);
-              // Retry logic would go here
-            }}
-          >
-            <Text style={styles.retryBtnText}>Retry</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  }
-
-  /* 🚫 EMPTY */
-  if (courses.length === 0) {
-    return (
-      <View style={styles.center}>
-        <View style={styles.emptyCard}>
-          <BookOpen size={48} color="#2a2a2a" />
-          <Text style={styles.emptyText}>No courses found</Text>
-        </View>
-      </View>
-    );
-  }
+  useEffect(() => {
+    if (isConnected) {
+      fetchCourses();
+    }
+  }, [isConnected]);
 
   const getBatteryIcon = () => {
     if (batteryLevel <= 20) return "🔴";
@@ -223,58 +195,88 @@ const HomePage = () => {
         {/* Courses Grid */}
         <View style={styles.coursesSection}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Available Courses</Text>
-            <View style={styles.courseCountBadge}>
-              <Text style={styles.courseCountText}>{courses.length}</Text>
-            </View>
+            <Text style={styles.sectionTitle}>
+              {isConnected ? "Available Courses" : "Offline Mode"}
+            </Text>
+            {isConnected && (
+              <View style={styles.courseCountBadge}>
+                <Text style={styles.courseCountText}>{courses.length}</Text>
+              </View>
+            )}
           </View>
 
-          <FlatList
-            data={courses}
-            keyExtractor={(item) => item._id || item.id}
-            numColumns={2}
-            columnWrapperStyle={styles.columnWrapper}
-            scrollEnabled={false}
-            renderItem={({ item }) => (
-              <TouchableOpacity
-                style={[
-                  styles.courseCard,
-                  isBatterySaverOn && styles.batterySaverCard,
-                ]}
-                activeOpacity={0.8}
-                onPress={() =>
-                  navigation.navigate("CourseScreen", {
-                    courseId: item._id || item.id,
-                  })
-                }
-              >
-                <Image
-                  source={{
-                    uri:
-                      item.thumbnail ||
-                      "https://images.unsplash.com/photo-1516321318423-f06f85e504b3",
-                  }}
-                  style={styles.thumbnail}
-                />
+          {!isConnected ? (
+            <View style={[styles.center, { paddingVertical: 40, backgroundColor: 'transparent' }]}>
+              <DownloadCloud size={48} color="#bb86fc" />
+              <Text style={[styles.errorText, { marginTop: 16 }]}>You are offline</Text>
+              <Text style={styles.errorHint}>Access your downloaded videos above</Text>
+            </View>
+          ) : loading ? (
+            <View style={[styles.center, { paddingVertical: 40, backgroundColor: 'transparent' }]}>
+              <ActivityIndicator size="large" color="#bb86fc" />
+              <Text style={styles.loadingText}>Loading courses...</Text>
+            </View>
+          ) : error ? (
+            <View style={[styles.center, { paddingVertical: 40, backgroundColor: 'transparent' }]}>
+              <Zap size={48} color="#bb86fc" />
+              <Text style={styles.errorText}>Error: {error}</Text>
+              <Text style={styles.errorHint}>Make sure backend is running on port 7777</Text>
+              <TouchableOpacity style={styles.retryBtn} onPress={fetchCourses}>
+                <Text style={styles.retryBtnText}>Retry</Text>
+              </TouchableOpacity>
+            </View>
+          ) : courses.length === 0 ? (
+            <View style={[styles.center, { paddingVertical: 40, backgroundColor: 'transparent' }]}>
+              <BookOpen size={48} color="#2a2a2a" />
+              <Text style={styles.emptyText}>No courses found</Text>
+            </View>
+          ) : (
+            <FlatList
+              data={courses}
+              keyExtractor={(item) => item._id || item.id}
+              numColumns={2}
+              columnWrapperStyle={styles.columnWrapper}
+              scrollEnabled={false}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={[
+                    styles.courseCard,
+                    isBatterySaverOn && styles.batterySaverCard,
+                  ]}
+                  activeOpacity={0.8}
+                  onPress={() =>
+                    navigation.navigate("CourseScreen", {
+                      courseId: item._id || item.id,
+                    })
+                  }
+                >
+                  <Image
+                    source={{
+                      uri:
+                        item.thumbnail ||
+                        "https://images.unsplash.com/photo-1516321318423-f06f85e504b3",
+                    }}
+                    style={styles.thumbnail}
+                  />
 
-                <View style={styles.courseOverlay}>
-                  <View style={styles.courseTag}>
-                    <Text style={styles.courseTagText}>
-                      {item.level || "Beginner"}
-                    </Text>
+                  <View style={styles.courseOverlay}>
+                    <View style={styles.courseTag}>
+                      <Text style={styles.courseTagText}>
+                        {item.level || "Beginner"}
+                      </Text>
+                    </View>
                   </View>
-                </View>
 
-                <View style={styles.courseContent}>
-                  <Text style={styles.courseTitle} numberOfLines={1}>
-                    {item.title}
-                  </Text>
+                  <View style={styles.courseContent}>
+                    <Text style={styles.courseTitle} numberOfLines={1}>
+                      {item.title}
+                    </Text>
 
-                  <Text style={styles.courseDescription} numberOfLines={2}>
-                    {item.description || "Learn the fundamentals and advance your skills"}
-                  </Text>
+                    <Text style={styles.courseDescription} numberOfLines={2}>
+                      {item.description || "Learn the fundamentals and advance your skills"}
+                    </Text>
 
-                  {/* <View style={styles.courseMeta}>
+                    {/* <View style={styles.courseMeta}>
                     <View style={styles.metaItem}>
                       <BookOpen size={12} color="#888" />
                       <Text style={styles.metaText}>
@@ -290,34 +292,35 @@ const HomePage = () => {
                     </View>
                   </View> */}
 
-                  <View style={styles.courseFooter}>
-                    <Text style={styles.coursePrice}>
-                      {item.price ? `$${item.price}` : "Free"}
-                    </Text>
+                    <View style={styles.courseFooter}>
+                      <Text style={styles.coursePrice}>
+                        {item.price ? `$${item.price}` : "Free"}
+                      </Text>
 
-                    <View style={styles.startButton}>
-                      <PlayCircle size={14} color="#fff" />
-                      <Text style={styles.startButtonText}>Start</Text>
+                      <View style={styles.startButton}>
+                        <PlayCircle size={14} color="#fff" />
+                        <Text style={styles.startButtonText}>Start</Text>
+                      </View>
                     </View>
-                  </View>
 
-                  {/* Students count indicator */}
-                  {/* <View style={styles.studentsIndicator}>
+                    {/* Students count indicator */}
+                    {/* <View style={styles.studentsIndicator}>
                     <Users size={10} color="#bb86fc" />
                     <Text style={styles.studentsText}>
                       {item.students || "1.2k"} students
                     </Text>
                   </View> */}
-                </View>
-
-                {isBatterySaverOn && (
-                  <View style={styles.batterySaverIndicator}>
-                    <Zap size={12} color="#bb86fc" />
                   </View>
-                )}
-              </TouchableOpacity>
-            )}
-          />
+
+                  {isBatterySaverOn && (
+                    <View style={styles.batterySaverIndicator}>
+                      <Zap size={12} color="#bb86fc" />
+                    </View>
+                  )}
+                </TouchableOpacity>
+              )}
+            />
+          )}
         </View>
       </ScrollView>
     </View>

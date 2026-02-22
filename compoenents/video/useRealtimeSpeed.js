@@ -8,6 +8,8 @@ const useRealtimeSpeed = (interval = 3000) => {
   const [speed, setSpeed] = useState(null);
 
   useEffect(() => {
+    if (!interval) return;
+
     let isMounted = true;
 
     const testSpeed = async () => {
