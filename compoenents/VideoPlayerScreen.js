@@ -111,7 +111,7 @@ const VideoPlayerScreen = () => {
         setLoading(true);
 
         const res = await fetch(
-          `http://10.197.15.102:7777/api/videos/course/${courseId}/${videoId}`
+          `http://10.107.25.116:7777/api/videos/course/${courseId}/${videoId}`
         );
 
         if (!res.ok) throw new Error("Video not found");
@@ -119,7 +119,7 @@ const VideoPlayerScreen = () => {
         setVideoData(data);
 
         const listRes = await fetch(
-          `http://10.197.15.102:7777/api/videos/course/${courseId}`
+          `http://10.107.25.116:7777/api/videos/course/${courseId}`
         );
 
         const listData = await listRes.json();
@@ -175,7 +175,7 @@ const VideoPlayerScreen = () => {
   // Helper to ensure URLs use the correct backend host (fixes local IP inconsistencies)
   const normalizeUrl = (url) => {
     if (!url) return url;
-    const currentBackendIP = "10.197.15.102:7777";
+    const currentBackendIP = "10.107.25.116:7777";
     return url.replace(/10\.\d+\.\d+\.\d+:\d+/, currentBackendIP);
   };
 

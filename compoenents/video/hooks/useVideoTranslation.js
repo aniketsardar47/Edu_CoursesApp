@@ -78,6 +78,7 @@ export const useVideoTranslation = (videoId, videoData, isConnected, forceOfflin
 
                 // Save initial english to cache as well
                 await saveTranslation(videoId, "en", text);
+                await cacheAllTranslations(videoId, videoData.descriptionUrls);
             } catch (error) {
                 console.error("[useVideoTranslation] Error fetching description:", error);
                 setDescriptionText("Description not available.");
@@ -88,6 +89,33 @@ export const useVideoTranslation = (videoId, videoData, isConnected, forceOfflin
 
         fetchInitialDescription();
     }, [videoId, videoData?.descriptionUrls?.english, videoData?.descriptionUrl, forceOffline, normalizeUrl]);
+
+
+    const cacheAllTranslations = async (videoId, descriptionUrls) => {
+        if (!descriptionUrls) return;
+
+        try {
+            const entries = Object.entries(descriptionUrls);
+
+            for (const [langKey, url] of entries) {
+                try {
+                    const normalized = normalizeUrl(url);
+                    const response = await fetch(normalized);
+
+                    if (!response.ok) continue;
+
+                    const text = await response.text();
+                    if (text) {
+                        await saveTranslation(videoId, langKey, text);
+                    }
+                } catch (err) {
+                    console.warn(`[cacheAllTranslations] Failed for ${langKey}`, err);
+                }
+            }
+        } catch (err) {
+            console.error("[cacheAllTranslations] Error:", err);
+        }
+    };
 
     const translateDescription = useCallback(async (targetLang) => {
         if (!videoData?.descriptionUrls) {
@@ -110,7 +138,7 @@ export const useVideoTranslation = (videoId, videoData, isConnected, forceOfflin
             try {
                 setTranslating(true);
                 const response = await fetch(
-                    "http://10.197.15.102:7777/api/translate/translate",
+                    "http://10.107.25.116:7777/api/translate/translate",
                     {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
@@ -195,7 +223,7 @@ export const useVideoTranslation = (videoId, videoData, isConnected, forceOfflin
 
     // Re-translate automatically when the manual offline mode is toggled by the user
     useEffect(() => {
-        if (originalText || videoData?.descriptionUrls) {
+        if (forceOffline && selectedLanguage) {
             translateDescription(selectedLanguage);
         }
     }, [forceOffline]); // Intentionally only depend on forceOffline to avoid loops

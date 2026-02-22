@@ -21,7 +21,7 @@ export const useVideoMetadata = (courseId, videoId, isAutoQuality = true) => {
     // Fetch Video Data
     useEffect(() => {
         if (!courseId || !videoId) return;
-        const apiUrl = `http://10.197.15.102:7777/api/videos/course/${courseId}/${videoId}`;
+        const apiUrl = `http://10.107.25.116:7777/api/videos/course/${courseId}/${videoId}`;
         console.log(`[useVideoMetadata] Fetching video data: ${apiUrl}`);
         fetch(apiUrl)
             .then((res) => res.json())

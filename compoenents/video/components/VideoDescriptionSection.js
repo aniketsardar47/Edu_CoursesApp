@@ -11,8 +11,6 @@ const VideoDescriptionSection = ({
     translating,
     loadingDescription,
     isOfflineCache,
-    isManualOffline,
-    setIsManualOffline,
     onTranslate,
     onSpeak,
     onShowFullDesc
@@ -29,7 +27,7 @@ const VideoDescriptionSection = ({
                     </View>
                 )}
 
-                <TouchableOpacity
+                {/* <TouchableOpacity
                     style={[styles.offlineToggle, isManualOffline && styles.offlineToggleActive]}
                     onPress={() => setIsManualOffline(!isManualOffline)}
                 >
@@ -41,7 +39,7 @@ const VideoDescriptionSection = ({
                     <Text style={[styles.offlineToggleText, isManualOffline && styles.offlineToggleTextActive]}>
                         {isManualOffline ? "Mode: Offline" : "Mode: Online"}
                     </Text>
-                </TouchableOpacity>
+                </TouchableOpacity> */}
             </View>
 
             {/* Simplified Language Picker as a Display Card */}

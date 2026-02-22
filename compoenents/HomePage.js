@@ -75,7 +75,7 @@ const HomePage = () => {
     if (!isConnected) return;
     setLoading(true);
     setError(null);
-    fetch("http://10.197.15.102:7777/api/courses")
+    fetch("http://10.107.25.116:7777/api/courses")
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
         return res.json();

@@ -58,7 +58,7 @@ const VideoPlayer = () => {
   // Helper to ensure URLs use the correct backend host
   const normalizeUrl = useCallback((url) => {
     if (!url) return url;
-    const currentBackendIP = "10.197.15.102:7777";
+    const currentBackendIP = "10.107.25.116:7777";
     return url.replace(/10\.\d+\.\d+\.\d+:\d+/, currentBackendIP);
   }, []);
 

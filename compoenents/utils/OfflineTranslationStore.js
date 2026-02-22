@@ -10,17 +10,13 @@ const ensureDirectory = async () => {
 };
 
 /**
- * Saves a translated description to local storage.
- * @param {string} videoId 
- * @param {string} lang e.g., 'en', 'hi', 'mr'
- * @param {string} text 
+ * Saves translated description locally (per video & language)
  */
 export const saveTranslation = async (videoId, lang, text) => {
     try {
         await ensureDirectory();
         const filePath = `${TRANSLATION_FOLDER}${videoId}_${lang}.txt`;
         await FileSystem.writeAsStringAsync(filePath, text);
-        console.log(`[OfflineTranslationStore] Saved ${lang} for ${videoId}`);
         return true;
     } catch (e) {
         console.error(`[OfflineTranslationStore] Save failed:`, e);
@@ -29,18 +25,17 @@ export const saveTranslation = async (videoId, lang, text) => {
 };
 
 /**
- * Retrieves a translated description from local storage.
- * @param {string} videoId 
- * @param {string} lang 
+ * Gets cached translation
  */
 export const getTranslation = async (videoId, lang) => {
     try {
         const filePath = `${TRANSLATION_FOLDER}${videoId}_${lang}.txt`;
         const fileInfo = await FileSystem.getInfoAsync(filePath);
+
         if (fileInfo.exists) {
-            const text = await FileSystem.readAsStringAsync(filePath);
-            return text;
+            return await FileSystem.readAsStringAsync(filePath);
         }
+
         return null;
     } catch (e) {
         console.error(`[OfflineTranslationStore] Retrieval failed:`, e);
@@ -49,7 +44,7 @@ export const getTranslation = async (videoId, lang) => {
 };
 
 /**
- * Checks if a translation exists locally.
+ * Check if translation exists
  */
 export const hasTranslation = async (videoId, lang) => {
     const filePath = `${TRANSLATION_FOLDER}${videoId}_${lang}.txt`;
