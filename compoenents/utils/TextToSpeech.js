@@ -2,6 +2,7 @@ import * as Speech from "expo-speech";
 
 export const speakEnglishText = async (text) => {
   if (!text) return;
+  
 
   try {
     const currentlySpeaking = await Speech.isSpeakingAsync();

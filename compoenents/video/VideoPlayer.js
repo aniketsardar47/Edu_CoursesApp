@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useCallback } from "react";
+import React, { useState, useMemo, useRef, useCallback, useEffect } from "react";
 import {
   View,
   Text,
@@ -14,7 +14,6 @@ import { Video } from "expo-av";
 import { BlurView } from 'expo-blur';
 import { Ionicons } from "@expo/vector-icons";
 import { useDispatch } from "react-redux";
-
 
 // Redux & Utils
 import { addDownload } from "../redux/DownloadSlice";
@@ -54,9 +53,6 @@ const VideoPlayer = () => {
   const [isDownloading, setIsDownloading] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
 
-  // 1. Meta & Env Hook
-  const { videoData, batterySaverOn, speed, isConnected } = useVideoMetadata(courseId, videoId, quality === "Auto");
-
   // Helper to ensure URLs use the correct backend host
   const normalizeUrl = useCallback((url) => {
     if (!url) return url;
@@ -64,10 +60,10 @@ const VideoPlayer = () => {
     return url.replace(/10\.\d+\.\d+\.\d+:\d+/, currentBackendIP);
   }, []);
 
-  // 2. Inactivity Hook
-  const { isIdle, resetIdleTimer } = useVideoInactivity(videoRef);
+  // 1. Hooks (Fixed duplicate isIdle declaration)
+  const { videoData, batterySaverOn, speed, isConnected } = useVideoMetadata(courseId, videoId, quality === "Auto");
+  const { isIdle, resetIdleTimer, updatePlaybackStatus } = useVideoInactivity(videoRef);
 
-  // 3. Translation Hook
   const {
     descriptionText,
     selectedLanguage,
@@ -78,7 +74,6 @@ const VideoPlayer = () => {
     translateDescription
   } = useVideoTranslation(videoId, videoData, isConnected, isManualOffline, normalizeUrl);
 
-  // 4. Progress Hook
   const {
     localWatchedMillis,
     totalDurationMillis,
@@ -87,7 +82,12 @@ const VideoPlayer = () => {
     onLoad
   } = useVideoProgress(videoId, videoRef);
 
-  // --- Core Utility Functions ---
+  // Cleanup speech on unmount
+  useEffect(() => {
+    return () => stopSpeech();
+  }, []);
+
+  // --- Logic ---
 
   const currentUri = useMemo(() => {
     if (!videoData) return null;
@@ -104,29 +104,19 @@ const VideoPlayer = () => {
     return normalizeUrl(url);
   }, [quality, speed, videoData, normalizeUrl]);
 
+  // Priority: Local (Downloaded) -> Remote
   const sourceUri = localUri || currentUri;
-
-
-
-  const handleSpeak = () => {
-    if (!descriptionText) return;
-
-    speakEnglishText(descriptionText, () => {
-      setIsSpeaking(false);
-    });
-
-    setIsSpeaking(true);
-  };
 
   const handleToggleSpeak = () => {
     if (isSpeaking) {
       stopSpeech();
       setIsSpeaking(false);
     } else {
-      handleSpeak();
+      if (!descriptionText) return;
+      setIsSpeaking(true);
+      speakEnglishText(descriptionText, () => setIsSpeaking(false));
     }
   };
-
 
   const handleDownloadAction = async () => {
     if (isDownloading || !videoData) return;
@@ -150,11 +140,11 @@ const VideoPlayer = () => {
             thumbnail: videoData.thumbnail || "https://via.placeholder.com/150",
             timestamp: new Date().toISOString(),
           }));
-          Alert.alert("Success", "Video and translations downloaded for offline use!");
+          setLocalUri(finalUri); // Update local state immediately
+          Alert.alert("Success", "Lesson available offline!");
         }
       }
     } catch (error) {
-      console.error("[VideoPlayer] Download Error:", error);
       Alert.alert("Error", "Download failed.");
     } finally {
       setIsDownloading(false);
@@ -169,22 +159,6 @@ const VideoPlayer = () => {
     } catch (e) { Alert.alert("Error", "Failed to share video"); }
   };
 
-  const downloadAttachment = async (url, fileName) => {
-    try {
-      const safeFileName = fileName.replace(/\s+/g, "_");
-      const fileUri = FileSystemLegacy.documentDirectory + safeFileName;
-      const result = await FileSystemLegacy.downloadAsync(url, fileUri);
-      if (result.status === 200 && (await Sharing.isAvailableAsync())) {
-        await Sharing.shareAsync(result.uri);
-      }
-    } catch { Alert.alert("Download Error", "Could not complete download."); }
-  };
-
-  const openAttachment = async (url) => {
-    const supported = await Linking.canOpenURL(url);
-    supported ? Linking.openURL(url) : Alert.alert("Cannot open file");
-  };
-
   if (!videoData || !sourceUri) {
     return (
       <View style={styles.loadingContainer}>
@@ -196,45 +170,50 @@ const VideoPlayer = () => {
 
   return (
     <View style={styles.container} onTouchStart={resetIdleTimer}>
-      <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-
+      <ScrollView 
+        style={styles.scrollView} 
+        contentContainerStyle={styles.scrollContent} 
+        showsVerticalScrollIndicator={false}
+      >
         {/* Video Player Section */}
-        <View style={[styles.videoWrapper, batterySaverOn && styles.batterySaverVideo]}>
+        <View style={styles.videoWrapper}>
           <Video
             ref={videoRef}
             source={{ uri: sourceUri }}
-            style={styles.video}
-            useNativeControls
+            style={[styles.video, batterySaverOn && styles.batterySaverVideo]}
+            useNativeControls={!isIdle} // Controls hide when idle overlay shows
             resizeMode="contain"
-            shouldPlay={isFocused}
-            progressUpdateIntervalMillis={100}
-            onPlaybackStatusUpdate={onPlaybackStatusUpdate}
+            shouldPlay={isFocused && !isIdle}
             onLoad={onLoad}
+            onPlaybackStatusUpdate={(status) => {
+              onPlaybackStatusUpdate(status);
+              updatePlaybackStatus(status);
+            }}
           />
+
           {isIdle && (
-            <BlurView intensity={80} tint="dark" style={StyleSheet.absoluteFill}>
-              <View style={styles.idleOverlay}>
-                <Ionicons name="play-circle" size={80} color="white" opacity={0.8} />
-                <Text style={styles.idleText}>Tap to Resume Learning</Text>
-              </View>
-            </BlurView>
+            <TouchableOpacity
+              activeOpacity={1}
+              style={StyleSheet.absoluteFill}
+              onPress={resetIdleTimer}
+            >
+              <BlurView intensity={90} tint="dark" style={StyleSheet.absoluteFill}>
+                <View style={styles.idleOverlay}>
+                  <Ionicons name="hand-pointing-up" size={80} color="#bb86fc" />
+                  <Text style={styles.idleText}>Are you still watching?</Text>
+                  <Text style={styles.idleSubText}>Tap to continue your lesson</Text>
+                </View>
+              </BlurView>
+            </TouchableOpacity>
           )}
         </View>
 
         {/* Title Section */}
         <View style={styles.titleSection}>
-          <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
+          <View style={styles.titleRow}>
             <View style={styles.titleAccent} />
             <Text style={styles.videoTitle}>{videoData.title || "Video Lesson"}</Text>
           </View>
-          {/* <View style={styles.trackingContainer}>
-            <Text style={[styles.trackingText, { color: Number(watchedPercentage) >= 99 ? "#4ade80" : "#bb86fc" }]}>
-              {watchedPercentage}%
-            </Text>
-            <Text style={[styles.incompleteText, Number(watchedPercentage) >= 99 && { color: '#4ade80' }]}>
-              {Number(watchedPercentage) >= 99 ? "Completed" : "In Progress"}
-            </Text>
-          </View> */}
         </View>
 
         {/* Modular Components */}
@@ -267,23 +246,25 @@ const VideoPlayer = () => {
           loadingDescription={loadingDescription}
           isOfflineCache={isOfflineCache}
           onTranslate={translateDescription}
-
-          onSpeak={handleSpeak}
-          onToggleSpeak={handleToggleSpeak}
+          onSpeak={handleToggleSpeak}
           isSpeaking={isSpeaking}
-
           onShowFullDesc={() => setShowFullDesc(true)}
         />
 
-        <VideoAttachmentsList
-          attachments={videoData.attachments}
-          onOpen={openAttachment}
-          onDownload={downloadAttachment}
-        />
+        {videoData.attachments && (
+            <VideoAttachmentsList
+                attachments={videoData.attachments}
+                onOpen={(url) => Linking.openURL(normalizeUrl(url))}
+                onDownload={(url, name) => Alert.alert("Download", `Download ${name}?`)}
+            />
+        )}
 
         {/* Quiz Button */}
         {videoData.quiz?.length > 0 && (
-          <TouchableOpacity style={styles.quizBtn} onPress={() => navigation.navigate("QuizScreen", { quiz: videoData.quiz })}>
+          <TouchableOpacity 
+            style={styles.quizBtn} 
+            onPress={() => navigation.navigate("QuizScreen", { quiz: videoData.quiz })}
+          >
             <View style={styles.quizContent}>
               <Ionicons name="help-circle-outline" size={24} color="#fff" />
               <View style={styles.quizTextContainer}>
@@ -306,7 +287,7 @@ const VideoPlayer = () => {
                 <Ionicons name="close" size={24} color="#fff" />
               </TouchableOpacity>
             </View>
-            <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
+            <ScrollView style={styles.modalContent}>
               <Text style={styles.normalText}>{renderFormattedText(descriptionText)}</Text>
             </ScrollView>
           </View>
@@ -319,27 +300,26 @@ const VideoPlayer = () => {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0a0a0a' },
   scrollView: { flex: 1 },
-  scrollContent: { paddingBottom: 30, paddingTop: 32 },
+  scrollContent: { paddingBottom: 30, paddingTop: 10 },
   loadingContainer: { flex: 1, backgroundColor: '#0a0a0a', justifyContent: "center", alignItems: "center" },
   loadingText: { color: "#bb86fc", marginTop: 10 },
-  videoWrapper: { width: "100%", aspectRatio: 16 / 9, backgroundColor: "#000", position: 'relative' },
+  videoWrapper: { width: "100%", aspectRatio: 16 / 9, backgroundColor: "#000" },
   video: { width: "100%", height: "100%" },
-  batterySaverVideo: { opacity: 0.7 },
-  idleOverlay: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  idleText: { color: 'white', marginTop: 10, fontSize: 16, fontWeight: '600' },
-  titleSection: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 18, backgroundColor: '#000', marginBottom: 16 },
+  batterySaverVideo: { opacity: 0.6 },
+  idleOverlay: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.4)' },
+  idleText: { color: 'white', marginTop: 10, fontSize: 18, fontWeight: 'bold' },
+  idleSubText: { color: '#ccc', fontSize: 14 },
+  titleSection: { paddingHorizontal: 16, paddingVertical: 18, backgroundColor: '#000' },
+  titleRow: { flexDirection: 'row', alignItems: 'center' },
   titleAccent: { width: 4, height: 24, backgroundColor: '#bb86fc', borderRadius: 2, marginRight: 12 },
   videoTitle: { color: '#fff', fontSize: 18, fontWeight: 'bold', flex: 1 },
-  trackingContainer: { alignItems: 'flex-end' },
-  trackingText: { fontSize: 16, fontWeight: '800' },
-  incompleteText: { color: '#888', fontSize: 10, fontWeight: '600', textTransform: 'uppercase', marginTop: 2 },
-  quizBtn: { backgroundColor: '#7c3aed', marginHorizontal: 16, borderRadius: 20, padding: 20 },
-  quizContent: { flexDirection: 'row', alignItems: 'center', gap: 15 },
-  quizTextContainer: { flex: 1 },
+  quizBtn: { backgroundColor: '#7c3aed', marginHorizontal: 16, borderRadius: 15, padding: 18, marginTop: 20 },
+  quizContent: { flexDirection: 'row', alignItems: 'center' },
+  quizTextContainer: { flex: 1, marginLeft: 15 },
   quizBtnText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
   quizSubText: { color: 'rgba(255,255,255,0.7)', fontSize: 12 },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center' },
-  modalContainer: { width: '90%', maxHeight: '80%', backgroundColor: '#111', borderRadius: 25, overflow: 'hidden', borderWidth: 1, borderColor: '#333' },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.9)', justifyContent: 'center', alignItems: 'center' },
+  modalContainer: { width: '90%', maxHeight: '80%', backgroundColor: '#111', borderRadius: 20, borderWidth: 1, borderColor: '#333' },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, borderBottomWidth: 1, borderBottomColor: '#222' },
   modalTitle: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
   modalContent: { padding: 20 },

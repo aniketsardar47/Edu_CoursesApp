@@ -1,54 +1,54 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 
-/**
- * Hook to manage video inactivity (blur and auto-pause).
- * @param {object} videoRef Reference to the Expo AV Video component
- * @returns {object} { isIdle, setIsIdle, resetIdleTimer }
- */
 export const useVideoInactivity = (videoRef) => {
-    const [isIdle, setIsIdle] = useState(false);
-    const idleTimerRef = useRef(null);
-    const pauseTimerRef = useRef(null);
+  const [isIdle, setIsIdle] = useState(false);
+  const idleTimerRef = useRef(null);
+  const isPlayingRef = useRef(false); // Track play state without triggering re-renders
 
-    const resetIdleTimer = useCallback(() => {
-        // If it was blurred, remove blur and play
-        if (isIdle) {
-            setIsIdle(false);
-            videoRef.current?.playAsync();
-        }
+  const clearTimer = () => {
+    if (idleTimerRef.current) {
+      clearTimeout(idleTimerRef.current);
+      idleTimerRef.current = null;
+    }
+  };
 
-        // Clear existing timers
-        if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
-        if (pauseTimerRef.current) clearTimeout(pauseTimerRef.current);
-
-        // Set new timer for 3 minutes (180,000ms) to trigger Blur
-        idleTimerRef.current = setTimeout(() => {
-            handleInactivity();
-        }, 10000);
-    }, [isIdle, videoRef]);
-
-    const handleInactivity = useCallback(() => {
+  const startTimer = useCallback(() => {
+    clearTimer();
+    // Only start the countdown if the video is actually playing
+    if (isPlayingRef.current) {
+      idleTimerRef.current = setTimeout(() => {
         setIsIdle(true);
-        console.log("[useVideoInactivity] Inactivity detected: Blur activated.");
+        videoRef.current?.pauseAsync();
+      }, 5000);
+    }
+  }, [videoRef]);
 
-        // Clear any existing pause timer just in case
-        if (pauseTimerRef.current) clearTimeout(pauseTimerRef.current);
+  const resetIdleTimer = useCallback(() => {
+    if (isIdle) {
+      setIsIdle(false);
+      videoRef.current?.playAsync();
+      // startTimer will be triggered by the playback status update
+    } else {
+      startTimer();
+    }
+  }, [isIdle, startTimer, videoRef]);
 
-        // Set a secondary timer for 2 minutes (120,000ms) to Pause the video
-        pauseTimerRef.current = setTimeout(() => {
-            console.log("[useVideoInactivity] Continuous inactivity: Pausing video.");
-            videoRef.current?.pauseAsync();
-        }, 120000);
-    }, [videoRef]);
+  // This function will be called by your video's onPlaybackStatusUpdate
+  const updatePlaybackStatus = useCallback((status) => {
+    isPlayingRef.current = status.isPlaying;
+    
+    if (status.isPlaying) {
+      // If video started playing and timer isn't running, start it
+      if (!idleTimerRef.current) startTimer();
+    } else {
+      // If video paused manually, kill the timer
+      clearTimer();
+    }
+  }, [startTimer]);
 
-    // Initialize timer on mount
-    useEffect(() => {
-        resetIdleTimer();
-        return () => {
-            if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
-            if (pauseTimerRef.current) clearTimeout(pauseTimerRef.current);
-        };
-    }, [resetIdleTimer]);
+  useEffect(() => {
+    return () => clearTimer();
+  }, []);
 
-    return { isIdle, setIsIdle, resetIdleTimer };
+  return { isIdle, resetIdleTimer, updatePlaybackStatus };
 };

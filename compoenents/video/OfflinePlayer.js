@@ -1,56 +1,73 @@
-import React, { useRef, useEffect, useState } from "react";
+import React, { useRef, useEffect, useState, useCallback } from "react";
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   ActivityIndicator,
-  Alert
+  Alert,
+  StatusBar,
+  Dimensions,
+  ScrollView,
 } from "react-native";
 import { useRoute, useNavigation } from "@react-navigation/native";
 import { useSelector, useDispatch } from "react-redux";
-import { updateVideoProgress } from "../redux/VideoProgressSlice";
 import { Video } from "expo-av";
+import { BlurView } from 'expo-blur';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from "@expo/vector-icons";
 import * as FileSystem from "expo-file-system/legacy";
+
+// Redux & Utils
+import { updateVideoProgress } from "../redux/VideoProgressSlice";
 import { decryptFile } from "../utils/DownloadManager";
+
+const { width } = Dimensions.get('window');
 
 const OfflinePlayer = () => {
   const route = useRoute();
   const navigation = useNavigation();
-  const videoRef = useRef(null);
+  const dispatch = useDispatch();
   const { videoId } = route.params;
 
-  const [decryptedUri, setDecryptedUri] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  const videoData = useSelector((state) =>
-    state.downloads.videos.find((v) => v.id === videoId)
-  );
-  const savedProgress = useSelector(state => state.videoProgress.progressByVideo[videoId]);
-  const dispatch = useDispatch();
-
+  // Refs
+  const videoRef = useRef(null);
   const lastPositionRef = useRef(0);
   const watchedMillisRef = useRef(0);
+  const idleTimerRef = useRef(null);
+
+  // State
+  const [decryptedUri, setDecryptedUri] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [isIdle, setIsIdle] = useState(false);
   const [localWatchedMillis, setLocalWatchedMillis] = useState(0);
   const [totalDurationMillis, setTotalDurationMillis] = useState(0);
   const [shouldResume, setShouldResume] = useState(true);
 
-  useEffect(() => {
-    if (savedProgress) {
-      watchedMillisRef.current = savedProgress.watchedSeconds * 1000;
-      setLocalWatchedMillis(savedProgress.watchedSeconds * 1000);
-      setTotalDurationMillis(savedProgress.totalDuration * 1000);
-      lastPositionRef.current = savedProgress.lastPosition;
-    } else {
-      watchedMillisRef.current = 0;
-      setLocalWatchedMillis(0);
-      setTotalDurationMillis(0);
-      lastPositionRef.current = 0;
-    }
-    setShouldResume(true);
-  }, [videoId]);
+  // Selectors
+  const videoData = useSelector((state) =>
+    state.downloads.videos.find((v) => v.id === videoId)
+  );
+  const savedProgress = useSelector(state => 
+    state.videoProgress.progressByVideo[videoId]
+  );
 
+  // --- 1. Inactivity Logic ---
+  const resetIdleTimer = useCallback(() => {
+    if (isIdle) {
+      setIsIdle(false);
+      videoRef.current?.playAsync();
+    }
+    if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+    
+    // 10 second idle window for offline learning
+    idleTimerRef.current = setTimeout(() => {
+      setIsIdle(true);
+      videoRef.current?.pauseAsync();
+    }, 10000);
+  }, [isIdle]);
+
+  // --- 2. Decryption & Setup ---
   useEffect(() => {
     let tempPath = null;
 
@@ -59,17 +76,15 @@ const OfflinePlayer = () => {
         setLoading(false);
         return;
       }
-
       try {
         setLoading(true);
-        // This creates a temp .mp4 copy from the .dat file
         const result = await decryptFile(videoData.localUri);
         if (result) {
           tempPath = result;
           setDecryptedUri(result);
         }
       } catch (error) {
-        Alert.alert("Error", "Could not load the secure video file.");
+        Alert.alert("Security Error", "Could not verify secure video signature.");
         navigation.goBack();
       } finally {
         setLoading(false);
@@ -78,8 +93,8 @@ const OfflinePlayer = () => {
 
     prepareVideo();
 
-    // Cleanup: Delete the temporary .mp4 copy when leaving
     return () => {
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
       if (tempPath) {
         FileSystem.deleteAsync(tempPath, { idempotent: true })
           .catch(err => console.log("Cleanup error:", err));
@@ -87,113 +102,141 @@ const OfflinePlayer = () => {
     };
   }, [videoData]);
 
+  // --- 3. Playback Handlers ---
+  const onPlaybackStatusUpdate = (status) => {
+    if (!status.isLoaded) return;
+
+    if (status.durationMillis) setTotalDurationMillis(status.durationMillis);
+
+    if (status.isPlaying) {
+      resetIdleTimer(); // Keep resetting while playing
+      const diff = status.positionMillis - lastPositionRef.current;
+      if (diff > 0 && diff < 1500) {
+        watchedMillisRef.current += diff;
+        setLocalWatchedMillis(watchedMillisRef.current);
+      }
+
+      // Sync to Redux every ~3 seconds
+      const currentSeconds = Math.floor(watchedMillisRef.current / 1000);
+      const lastSavedSeconds = savedProgress?.watchedSeconds || 0;
+
+      if (currentSeconds > lastSavedSeconds + 3) {
+        dispatch(updateVideoProgress({
+          videoId,
+          watchedSeconds: currentSeconds,
+          totalDuration: Math.floor(status.durationMillis / 1000),
+          lastPosition: status.positionMillis
+        }));
+      }
+    }
+    lastPositionRef.current = status.positionMillis;
+  };
+
   if (loading) {
     return (
       <View style={styles.center}>
         <ActivityIndicator size="large" color="#bb86fc" />
-        <Text style={styles.statusText}>Preparing Secure Video...</Text>
+        <Text style={styles.statusText}>Initializing Secure Vault...</Text>
       </View>
     );
   }
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={24} color="white" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitleText} numberOfLines={1}>
-          {videoData?.title || "Offline Video"}
-        </Text>
-      </View>
+      <StatusBar barStyle="light-content" translucent />
 
-      {/* Learning Progress Card */}
-      <View style={styles.progressCard}>
-        <View style={styles.sectionHeader}>
-          <Ionicons name="analytics-outline" size={18} color="#bb86fc" />
-          <Text style={styles.sectionTitle}>LEARNING PROGRESS</Text>
-        </View>
-
-        <View style={styles.progressContainer}>
-          <View style={styles.learningProgressBarBg}>
-            <View
-              style={[
-                styles.learningProgressBarFill,
-                {
-                  width: `${totalDurationMillis > 0 ? Math.min((localWatchedMillis / totalDurationMillis) * 100, 100) : 0}%`
-                }
-              ]}
-            />
-          </View>
-          <View style={styles.progressInfo}>
-            <Text style={styles.progressText}>
-              {totalDurationMillis > 0 ? Math.round(Math.min((localWatchedMillis / totalDurationMillis) * 100, 100)) : 0}% Completed
-            </Text>
-            <Text style={styles.progressText}>
-              {Math.floor(localWatchedMillis / 1000)}s / {Math.floor(totalDurationMillis / 1000)}s
-            </Text>
-          </View>
-        </View>
-      </View>
-
-      <View style={styles.videoContainer}>
+      {/* Video Player Section */}
+      <View style={styles.videoWrapper}>
         <Video
           ref={videoRef}
           source={{ uri: decryptedUri }}
           style={styles.video}
-          useNativeControls
+          useNativeControls={!isIdle}
           resizeMode="contain"
-          shouldPlay
-          progressUpdateIntervalMillis={100}
-          onPlaybackStatusUpdate={(status) => {
-            if (status.isLoaded) {
-              if (status.durationMillis) {
-                setTotalDurationMillis(status.durationMillis);
-              }
-              if (status.isPlaying) {
-                const diff = status.positionMillis - lastPositionRef.current;
-                if (diff > 0 && diff < 1500) {
-                  watchedMillisRef.current += diff;
-                  setLocalWatchedMillis(watchedMillisRef.current);
-                }
-
-                const currentSeconds = Math.floor(watchedMillisRef.current / 1000);
-                const lastSavedSeconds = savedProgress?.watchedSeconds || 0;
-
-                if (currentSeconds > lastSavedSeconds + 3) {
-                  dispatch(updateVideoProgress({
-                    videoId,
-                    watchedSeconds: currentSeconds,
-                    totalDuration: Math.floor(status.durationMillis / 1000),
-                    lastPosition: status.positionMillis
-                  }));
-                }
-              }
-              lastPositionRef.current = status.positionMillis;
-            }
-          }}
-          onLoad={(status) => {
-            const targetPosition = lastPositionRef.current > 0 ? lastPositionRef.current : (savedProgress?.lastPosition || 0);
-            if (shouldResume && targetPosition > 0) {
-              videoRef.current?.setPositionAsync(targetPosition);
-            }
-            videoRef.current?.playAsync();
+          shouldPlay={!isIdle}
+          progressUpdateIntervalMillis={500}
+          onPlaybackStatusUpdate={onPlaybackStatusUpdate}
+          onLoad={() => {
+            const target = savedProgress?.lastPosition || 0;
+            if (shouldResume && target > 0) videoRef.current?.setPositionAsync(target);
             setShouldResume(false);
           }}
         />
+
+        {/* Floating Back Button */}
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+          <BlurView intensity={20} tint="light" style={styles.backBtnBlur}>
+            <Ionicons name="chevron-back" size={24} color="white" />
+          </BlurView>
+        </TouchableOpacity>
+
+        {/* Inactivity Blur Overlay */}
+        {isIdle && (
+          <TouchableOpacity activeOpacity={1} style={StyleSheet.absoluteFill} onPress={resetIdleTimer}>
+            <BlurView intensity={95} tint="dark" style={StyleSheet.absoluteFill}>
+              <View style={styles.idleContent}>
+                <Ionicons name="eye-off-outline" size={60} color="#bb86fc" />
+                <Text style={styles.idleTitle}>Active Learning Paused</Text>
+                <Text style={styles.idleSub}>Tap the screen to continue your lesson</Text>
+              </View>
+            </BlurView>
+          </TouchableOpacity>
+        )}
       </View>
 
-      <View style={styles.infoCard}>
-        <View style={styles.offlineBadge}>
-          <Ionicons name="shield-checkmark" size={16} color="#4ade80" />
-          <Text style={styles.offlineText}>PROTECTED OFFLINE CONTENT</Text>
+      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+        {/* Progress Tracker Card */}
+        <View style={styles.premiumCard}>
+          <View style={styles.cardHeader}>
+            <View style={styles.glowPoint} />
+            <Text style={styles.cardTitle}>SESSION PROGRESS</Text>
+            <View style={styles.offlineTag}>
+              <Text style={styles.offlineTagText}>ENCRYPTED</Text>
+            </View>
+          </View>
+
+          <View style={styles.statsRow}>
+            <View style={styles.statItem}>
+              <Text style={styles.statValue}>
+                {totalDurationMillis > 0 ? Math.round((localWatchedMillis / totalDurationMillis) * 100) : 0}%
+              </Text>
+              <Text style={styles.statLabel}>COMPLETED</Text>
+            </View>
+            <View style={styles.verticalDivider} />
+            <View style={styles.statItem}>
+              <Text style={styles.statValue}>
+                {Math.floor(localWatchedMillis / 60000)}m {Math.floor((localWatchedMillis % 60000) / 1000)}s
+              </Text>
+              <Text style={styles.statLabel}>RETAINED</Text>
+            </View>
+          </View>
+
+          <View style={styles.progressTrack}>
+            <LinearGradient
+              colors={['#bb86fc', '#7c3aed']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={[
+                styles.progressFill,
+                { width: `${totalDurationMillis > 0 ? (localWatchedMillis / totalDurationMillis) * 100 : 0}%` }
+              ]}
+            />
+          </View>
         </View>
-        <Text style={styles.title}>{videoData?.title}</Text>
-        <Text style={styles.desc}>
-          This video is stored securely. The temporary playback file will be
-          automatically deleted when you exit this screen.
-        </Text>
-      </View>
+
+        {/* Video Info Section */}
+        <View style={styles.detailsSection}>
+          <View style={styles.secureBadge}>
+            <Ionicons name="shield-checkmark" size={16} color="#4ade80" />
+            <Text style={styles.secureBadgeText}>PROTECTED CONTENT</Text>
+          </View>
+          <Text style={styles.videoTitle}>{videoData?.title}</Text>
+          <Text style={styles.videoDesc}>
+            This video is being streamed from your local encrypted storage. No data usage is required. 
+            The playback environment is isolated to prevent unauthorized recording.
+          </Text>
+        </View>
+      </ScrollView>
     </View>
   );
 };
@@ -201,16 +244,56 @@ const OfflinePlayer = () => {
 export default OfflinePlayer;
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#000" },
-  center: { flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "#0a0a0a" },
-  header: { flexDirection: "row", alignItems: "center", paddingTop: 50, paddingBottom: 20, paddingHorizontal: 16, backgroundColor: "#121212" },
-  headerTitle: { color: "#fff", fontSize: 18, fontWeight: "bold", marginLeft: 15, flex: 1 },
-  videoWrapper: { width: "100%", aspectRatio: 16 / 9, backgroundColor: "#000" },
-  video: { width: "100%", height: "100%" },
-  infoCard: { padding: 20, backgroundColor: "#121212", flex: 1 },
-  offlineBadge: { flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "rgba(74, 222, 128, 0.1)", padding: 8, borderRadius: 8, alignSelf: 'flex-start', marginBottom: 15 },
-  offlineText: { color: "#4ade80", fontSize: 12, fontWeight: "bold" },
-  statusText: { color: "#bb86fc", marginTop: 10 },
-  title: { color: "#fff", fontSize: 22, fontWeight: "bold", marginBottom: 10 },
-  desc: { color: "#888", fontSize: 14, lineHeight: 22 }
+  container: { flex: 1, backgroundColor: "#050505" },
+  center: { flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "#050505" },
+  statusText: { color: "#bb86fc", marginTop: 15, fontSize: 14, letterSpacing: 1 },
+  scrollView: { flex: 1 },
+  
+  // Video Section
+  videoWrapper: { width: '100%', aspectRatio: 16/9, backgroundColor: '#000', zIndex: 5 },
+  video: { flex: 1 },
+  backBtn: { position: 'absolute', top: 45, left: 16, zIndex: 20 },
+  backBtnBlur: { padding: 8, borderRadius: 12, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' },
+  
+  // Idle Overlay
+  idleContent: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  idleTitle: { color: '#fff', fontSize: 20, fontWeight: 'bold', marginTop: 20 },
+  idleSub: { color: '#888', fontSize: 14, marginTop: 8 },
+
+  // Premium Card
+  premiumCard: {
+    backgroundColor: '#121212',
+    marginHorizontal: 16,
+    borderRadius: 24,
+    padding: 20,
+    marginTop: -25,
+    borderWidth: 1,
+    borderColor: '#222',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.5,
+    shadowRadius: 10,
+    elevation: 5
+  },
+  cardHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 20 },
+  glowPoint: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#bb86fc', marginRight: 10, shadowColor: '#bb86fc', shadowRadius: 5, shadowOpacity: 1 },
+  cardTitle: { color: '#888', fontSize: 11, fontWeight: '900', letterSpacing: 1.5 },
+  offlineTag: { marginLeft: 'auto', backgroundColor: 'rgba(187, 134, 252, 0.1)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
+  offlineTagText: { color: '#bb86fc', fontSize: 9, fontWeight: 'bold' },
+  
+  statsRow: { flexDirection: 'row', justifyContent: 'space-around', marginBottom: 20 },
+  statItem: { alignItems: 'center' },
+  statValue: { color: '#fff', fontSize: 22, fontWeight: 'bold' },
+  statLabel: { color: '#555', fontSize: 10, fontWeight: 'bold', marginTop: 4 },
+  verticalDivider: { width: 1, height: 40, backgroundColor: '#222' },
+  
+  progressTrack: { height: 6, backgroundColor: '#222', borderRadius: 3, overflow: 'hidden' },
+  progressFill: { height: '100%', borderRadius: 3 },
+
+  // Details Section
+  detailsSection: { padding: 24 },
+  secureBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 16 },
+  secureBadgeText: { color: '#4ade80', fontSize: 11, fontWeight: 'bold', letterSpacing: 0.5 },
+  videoTitle: { color: '#fff', fontSize: 24, fontWeight: 'bold', marginBottom: 12 },
+  videoDesc: { color: '#777', fontSize: 15, lineHeight: 24 }
 });
